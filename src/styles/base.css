@@ -1,0 +1,39 @@
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+:root {
+  --sidebar-left-w:  220px;
+  --sidebar-right-w: 420px;
+  --terminal-h:      180px;
+  --color-bg:        #0f1117;
+  --color-surface:   #1a1d27;
+  --color-border:    #2a2d3e;
+  --color-accent:    #6c8ef7;
+  --color-text:      #e2e4ef;
+  --color-muted:     #7a7f9a;
+  --color-success:   #4caf82;
+  --color-warn:      #f0b429;
+  --color-error:     #e05252;
+  --color-ai:        #29d9c2;
+  --font-ui:         'Segoe UI', system-ui, sans-serif;
+  --font-mono:       'Cascadia Code', 'Consolas', monospace;
+  --radius:          6px;
+  --space:           12px;
+}
+
+html, body {
+  height: 100%;
+  width: 100%;
+  overflow: hidden;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-family: var(--font-ui);
+  font-size: 14px;
+}
+
+a { color: inherit; text-decoration: none; cursor: pointer; }
+button { cursor: pointer; font-family: var(--font-ui); }
+textarea, input { font-family: var(--font-ui); }

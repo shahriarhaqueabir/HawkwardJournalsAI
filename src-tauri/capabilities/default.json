@@ -1,0 +1,12 @@
+{
+  "identifier": "main-capability",
+  "description": "Default permissions for the HawkwardJournalAI application.",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "shell:default",
+    "fs:default",
+    "dialog:default",
+    "notification:default"
+  ]
+}

@@ -1,0 +1,96 @@
+# =============================================================================
+# HawkwardJournalAI - Barebone Repository Manifest
+# =============================================================================
+
+# Rust / Backend Artifacts
+/target/
+/src-tauri/target/
+/src-tauri/target_temp/
+/src-tauri/gen/
+**/*.rs.bk
+build.rs
+/tools/
+
+# Binary Locks (Keep root Cargo.lock for deterministic builds)
+Cargo.lock
+!Cargo.lock
+/src-tauri/Cargo.lock
+!/src-tauri/Cargo.lock
+
+# Tauri / Dev Artifacts
+/src-tauri/tauri_dev_log.txt
+/src-tauri/build_error*.txt
+/src-tauri/build_full.txt
+/src-tauri/build_lib.txt
+/src-tauri/verbose_build.txt
+/src-tauri/tasklist
+/src-tauri/binaries/
+
+# IDEs & Editors
+.vscode/
+.idea/
+.vs/
+.helix/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+
+# Logs & Error Dumps
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+debug/
+test-results/
+coverage/
+
+# Local App Data (CRITICAL EXCLUSIONS)
+# These contain personal user data and should NEVER be in Git.
+/data/
+/backups/
+/attachments/
+/exports/
+
+# Database artifacts
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.sqlite
+*.sqlite-journal
+
+# Large Compiled Binary Data / Artifacts
+*.pdb
+*.lib
+*.rlib
+*.exe
+*.dll
+*.so
+*.dylib
+*.a
+
+# Agent / AI Metadata
+.gemini/
+.ai/
+/tmp/
+AgentDocs/research/
+
+# Keep empty directory structure via .gitkeep
+/data/*
+/backups/*
+/attachments/*
+/exports/*
+!/**/.gitkeep
+# .gitignore Refinements
++ /src-tauri/target/
++ /src-tauri/binaries/
++ /src-tauri/gen/
++ /src-tauri/target_temp/
++ node_modules/
++ .env
++ .env.*
++ *.pdb
++ *.lib
++ *.rlib

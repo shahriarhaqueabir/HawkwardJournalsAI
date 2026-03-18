@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+  <head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>HawkwardJournals</title>
+  <link rel="stylesheet" href="styles/base.css" />
+  <link rel="stylesheet" href="styles/layout.css" />
+  <link rel="stylesheet" href="styles/toast.css" />
+  <link rel="stylesheet" href="styles/components.css" />
+  <link rel="stylesheet" href="styles/ai-chat.css" />
+  <link rel="stylesheet" href="styles/tasks.css" />
+  <link rel="stylesheet" href="styles/themes/dark.css" />
+  </head>
+<body>
+  <div id="left-sidebar">
+    <div class="app-brand">🧠 HawkwardJournals</div>
+    <nav class="nav-menu">
+      <button class="nav-item active" data-tab="journal">📓 Journal</button>
+      <button class="nav-item" data-tab="tasks">✅ Tasks</button>
+      <button class="nav-item" data-tab="ai">🤖 AI</button>
+      <button class="nav-item" data-tab="reports">📊 Reports</button>
+      <button class="nav-item" data-tab="settings">⚙️ Settings</button>
+    </nav>
+    <div class="sidebar-footer">
+      <div id="ollama-status">🔴 Checking...</div>
+      <div id="db-path">📁 ./data/hawkward.db</div>
+      <div id="app-version">v0.1.0</div>
+    </div>
+  </div>
+
+  <main id="main-content">
+    <div id="tab-journal" class="tab-view active">
+      <div class="journal-view-layout">
+        <aside class="journal-list-panel" aria-label="Journal Entries">
+          <div class="journal-list-header">
+            <button id="btn-new-entry" class="btn-primary">+ New Entry</button>
+            <div class="search-box">
+              <input type="text" id="journal-search" placeholder="Search journal..." />
+              <span class="search-icon">🔍</span>
+            </div>
+          </div>
+          <div id="journal-entry-list" class="entry-list">
+            <!-- Journal entries will be rendered here -->
+            <div class="entry-list-empty">No entries yet.</div>
+          </div>
+        </aside>
+
+        <div class="journal-editor-panel">
+          <header class="editor-header">
+            <div class="header-main">
+              <input type="text" id="journal-title" placeholder="Untitled Entry" />
+              <div class="header-meta">
+                <span id="word-count">0 words</span>
+                <span id="save-status">Ready</span>
+              </div>
+            </div>
+            <div class="header-actions">
+              <button id="btn-analyze" class="btn-ghost" title="Analyze with AI">🪄 Analyze</button>
+              <button id="btn-delete-entry" class="btn-danger" title="Move to Trash">🗑️</button>
+            </div>
+          </header>
+          <div class="editor-body">
+            <textarea id="journal-editor" placeholder="Start writing your thoughts..."></textarea>
+          </div>
+          <input type="hidden" id="current-entry-id" value="" />
+        </div>
+      </div>
+    </div>
+    <div id="tab-tasks" class="tab-view">
+      <div class="tasks-view-layout">
+        <header class="tasks-header">
+          <div class="header-main">
+            <h2>Active Tasks</h2>
+            <div class="task-search-box">
+              <input type="text" id="task-search" placeholder="Search tasks..." />
+            </div>
+          </div>
+          <div class="header-actions">
+            <button id="btn-new-task" class="btn-primary">+ Add Task</button>
+          </div>
+        </header>
+        <div id="task-list-items" class="task-items-container">
+          <!-- Tasks will be rendered here -->
+          <div class="list-empty">Loading tasks...</div>
+        </div>
+      </div>
+
+      <!-- Task Detail Slide-in Panel -->
+      <aside id="task-detail-panel" class="detail-panel hidden" aria-label="Task Details">
+        <header class="panel-header">
+          <h3>Task Details</h3>
+          <button id="btn-close-task-detail" class="btn-icon">×</button>
+        </header>
+        <div class="panel-content">
+          <input type="hidden" id="detail-task-id" />
+          <div class="form-group">
+            <label for="detail-task-title">Title</label>
+            <input type="text" id="detail-task-title" placeholder="What needs to be done?" />
+          </div>
+          <div class="form-group">
+            <label for="detail-task-desc">Description</label>
+            <textarea id="detail-task-desc" rows="4" placeholder="Add details..."></textarea>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="detail-task-priority">Priority</label>
+              <select id="detail-task-priority" title="Task Priority">
+                <option value="low">Low</option>
+                <option value="medium">Medium</option>
+                <option value="high">High</option>
+                <option value="urgent">Urgent</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="detail-task-status">Status</label>
+              <select id="detail-task-status" title="Task Status">
+                <option value="todo">To Do</option>
+                <option value="in_progress">In Progress</option>
+                <option value="done">Done</option>
+                <option value="cancelled">Cancelled</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="detail-task-date">Due Date</label>
+              <input type="date" id="detail-task-date" title="Due Date" />
+            </div>
+            <div class="form-group">
+              <label for="detail-task-energy">Energy</label>
+              <select id="detail-task-energy" title="Energy Level">
+                <option value="">None</option>
+                <option value="deep_focus">Deep Focus</option>
+                <option value="light">Light</option>
+                <option value="admin">Admin</option>
+                <option value="errand">Errand</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="detail-task-project">Project</label>
+            <input type="text" id="detail-task-project" placeholder="Project name" />
+          </div>
+        </div>
+        <footer class="panel-footer">
+          <button id="btn-delete-task" class="btn-danger">Delete</button>
+          <button id="btn-save-task" class="btn-primary">Save Changes</button>
+        </footer>
+      </aside>
+    </div>
+    <div id="tab-ai" class="tab-view">AI Tab</div>
+    <div id="tab-reports" class="tab-view">Reports Tab</div>
+    <div id="tab-settings" class="tab-view">Settings Tab</div>
+  </main>
+
+  <aside id="right-sidebar">
+    <div class="sidebar-header">Thinking Partner</div>
+    <div id="ai-chat-messages">
+      <div class="ai-bubble">Write in your journal to begin.</div>
+    </div>
+    <div class="chat-input-area">
+      <textarea id="ai-chat-input" placeholder="Ask your partner..."></textarea>
+    </div>
+  </aside>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

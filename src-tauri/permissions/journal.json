@@ -1,0 +1,7 @@
+{
+  "identifier": "journal",
+  "description": "Allow all journal commands",
+  "commands": [
+    "*"
+  ]
+}
