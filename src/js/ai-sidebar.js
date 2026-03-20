@@ -1,8 +1,10 @@
 import { invoke } from "./ipc.js";
 
 export function initAiSidebar() {
-  const messagesEl = document.querySelector(".right-sidebar .ai-chat-messages");
+  const messagesEl = document.querySelector("#right-sidebar .ai-chat-messages");
   const currentEntryId = document.getElementById("current-entry-id");
+  const input = document.getElementById("ai-chat-input");
+  const sendBtn = document.getElementById("btn-ai-sidebar-send");
 
   if (!messagesEl) return;
 
@@ -11,6 +13,16 @@ export function initAiSidebar() {
     const { type } = payload;
 
     switch (type) {
+      case "ai_status":
+        if (input === document.activeElement) {
+          showProcessingStatus(payload.message || "Thinking...");
+        }
+        break;
+
+      case "ai_token":
+        appendSidebarToken(payload.token, payload.done);
+        break;
+
       case "journal_analysis_processing":
         if (currentEntryId.value === payload.entry_id) {
           showProcessingStatus();
@@ -39,11 +51,11 @@ export function initAiSidebar() {
     }
   };
 
-  function showProcessingStatus() {
+  function showProcessingStatus(label = "Thinking deeply about your entry...") {
     messagesEl.innerHTML = `
       <div class="ai-bubble processing">
         <div class="spinner"></div>
-        Thinking deeply about your entry...
+        ${label}
       </div>
     `;
   }
@@ -143,4 +155,56 @@ export function initAiSidebar() {
       });
     });
   }
+
+  function appendSidebarToken(token, done) {
+    let row = messagesEl.querySelector(".message-row.assistant:last-child");
+    if (!row) {
+      messagesEl.insertAdjacentHTML(
+        "beforeend",
+        `<div class="message-row assistant"><div class="message-bubble ai-bubble"></div></div>`
+      );
+      row = messagesEl.querySelector(".message-row.assistant:last-child");
+    }
+
+    const bubble = row.querySelector(".ai-bubble");
+    bubble.textContent += token;
+    if (done) {
+      bubble.classList.remove("processing");
+    }
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  async function sendSidebarMessage() {
+    const text = input?.value?.trim();
+    if (!text) return;
+
+    const entryId = currentEntryId?.value || null;
+    messagesEl.insertAdjacentHTML(
+      "beforeend",
+      `<div class="message-row user"><div class="message-bubble user-bubble"></div></div>`
+    );
+    const bubble = messagesEl.querySelector(".message-row.user:last-child .user-bubble");
+    bubble.textContent = text;
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+    input.value = "";
+
+    try {
+      await invoke("ai_chat", {
+        conversationId: null,
+        message: text,
+        source: "sidebar",
+        entryId,
+      });
+    } catch (err) {
+      showErrorStatus(String(err));
+    }
+  }
+
+  sendBtn?.addEventListener("click", sendSidebarMessage);
+  input?.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      sendSidebarMessage();
+    }
+  });
 }

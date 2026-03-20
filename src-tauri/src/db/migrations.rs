@@ -24,6 +24,16 @@ const MIGRATIONS: &[Migration] = &[
         name: "project_hierarchy",
         sql: include_str!("../../migrations/004_field_expansion.sql"),
     },
+    Migration {
+        version: 7,
+        name: "analytical_reports",
+        sql: include_str!("../../migrations/007_analytical_reports.sql"),
+    },
+    Migration {
+        version: 8,
+        name: "ai_analysis_fields",
+        sql: include_str!("../../migrations/008_ai_analysis_fields.sql"),
+    },
 ];
 
 fn is_begin_transaction_line(line: &str) -> bool {

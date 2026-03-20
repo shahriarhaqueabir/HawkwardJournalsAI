@@ -3,6 +3,8 @@ use serde_json::{json, Value};
 use crate::error::AppError;
 use tokio::sync::{Mutex, oneshot};
 use std::collections::HashMap;
+use std::time::Duration;
+use chrono::NaiveDate;
 use crate::events::{AppEvent, emit};
 use tauri::{AppHandle, Manager};
 
@@ -16,7 +18,6 @@ pub struct ToolDefinition {
 
 pub struct ToolConfirmation {
     pub tx: oneshot::Sender<bool>,
-    pub call_id: String,
 }
 
 pub struct AiToolState {
@@ -32,182 +33,158 @@ impl AiToolState {
 }
 
 pub fn get_tools_for_ollama() -> serde_json::Value {
-    serde_json::json!([
-        {
+    json!(get_tool_definitions()
+        .into_iter()
+        .map(|tool| json!({
             "type": "function",
             "function": {
-                "name": "create_task",
-                "description": "Propose a new task. ONLY call when user explicitly asks to create a task. Requires confirmation.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "title":        { "type": "string" },
-                        "priority":     { "type": "string", "enum": ["low","medium","high","urgent"] },
-                        "due_date":     { "type": "string", "description": "YYYY-MM-DD" },
-                        "energy_level": { "type": "string", "enum": ["deep_focus","light","admin","errand"] },
-                        "context_tag":  { "type": "string", "enum": ["computer","phone","errands","home","anywhere"] }
-                    },
-                    "required": ["title"]
-                }
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.parameters,
             }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "update_task",
-                "description": "Modify an existing task. ONLY call when user explicitly asks to update a task. Requires confirmation.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "id":       { "type": "string" },
-                        "title":    { "type": "string" },
-                        "status":   { "type": "string", "enum": ["idea","todo","in_progress","done","cancelled"] },
-                        "priority": { "type": "string", "enum": ["low","medium","high","urgent"] },
-                        "due_date": { "type": "string" }
-                    },
-                    "required": ["id"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "complete_task",
-                "description": "Mark a task as done. ONLY call when user explicitly asks to complete a task. Requires confirmation.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "id": { "type": "string" }
-                    },
-                    "required": ["id"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "list_tasks",
-                "description": "Retrieve tasks. Use when user asks what tasks they have.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "status":   { "type": "string" },
-                        "priority": { "type": "string" }
-                    }
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "search_journal",
-                "description": "Search journal entries. Use when user asks about past journal entries.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "query":     { "type": "string" },
-                        "date_from": { "type": "string" },
-                        "date_to":   { "type": "string" }
-                    },
-                    "required": ["query"]
-                }
-            }
-        },
-        {
-            "type": "function",
-            "function": {
-                "name": "fetch_url",
-                "description": "Fetch content from a URL. Use only when user provides a specific URL.",
-                "parameters": {
-                    "type": "object",
-                    "properties": {
-                        "url": { "type": "string" }
-                    },
-                    "required": ["url"]
-                }
-            }
-        }
-    ])
+        }))
+        .collect::<Vec<_>>())
 }
 
 pub fn get_tool_definitions() -> Vec<ToolDefinition> {
     vec![
         ToolDefinition {
             name: "create_task".into(),
-            description: "Propose a new task to be added to the user's task list. Requires user confirmation.".into(),
+            description: "Propose a new task to be added to the user's local task list. Use only when the user explicitly asks to create, add, or capture a concrete actionable task. Do not use for hypothetical brainstorming or vague intentions. Requires user confirmation before any database write.".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "title": { "type": "string", "description": "Short, clear title of the task" },
+                    "title": {
+                        "type": "string",
+                        "description": "Short, clear, actionable task title",
+                        "minLength": 1,
+                        "maxLength": 100
+                    },
                     "priority": { "type": "string", "enum": ["low", "medium", "high", "urgent"] },
-                    "due_date": { "type": "string", "description": "ISO 8601 date (YYYY-MM-DD)" },
+                    "due_date": {
+                        "type": "string",
+                        "description": "ISO 8601 date (YYYY-MM-DD)",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
                     "project_id": { "type": "string", "description": "Optional project ID (default: 'inbox')" },
                     "energy_level": { "type": "string", "enum": ["deep_focus", "light", "admin", "errand"] },
                     "context_tag": { "type": "string", "enum": ["computer", "phone", "errands", "home", "anywhere"] }
                 },
-                "required": ["title"]
+                "required": ["title"],
+                "additionalProperties": false
             }),
         },
         ToolDefinition {
             name: "update_task".into(),
-            description: "Modify an existing task. Requires user confirmation.".into(),
+            description: "Modify an existing task when the user explicitly asks to change a real task. Requires a specific task ID. Only include fields that should change. Prefer complete_task when the user is marking work done. Requires user confirmation before any database write.".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "id": { "type": "string", "description": "The unique ID of the task to update" },
-                    "title": { "type": "string" },
+                    "id": {
+                        "type": "string",
+                        "description": "The unique ID of the task to update",
+                        "minLength": 6
+                    },
+                    "title": { "type": "string", "maxLength": 100 },
                     "status": { "type": "string", "enum": ["todo", "in_progress", "done", "cancelled"] },
                     "priority": { "type": "string", "enum": ["low", "medium", "high", "urgent"] },
-                    "due_date": { "type": "string" }
+                    "due_date": {
+                        "type": "string",
+                        "description": "ISO 8601 date (YYYY-MM-DD)",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    }
                 },
-                "required": ["id"]
+                "required": ["id"],
+                "additionalProperties": false,
+                "minProperties": 2
             }),
         },
         ToolDefinition {
             name: "complete_task".into(),
-            description: "Mark a task as completed. Requires user confirmation.".into(),
+            description: "Mark a task as completed when the user explicitly says they finished or completed it. Do not use for planned future work or ambiguous references. Requires user confirmation before any database write.".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "id": { "type": "string", "description": "The unique ID of the task to complete" }
+                    "id": {
+                        "type": "string",
+                        "description": "The unique ID of the task to complete",
+                        "minLength": 6
+                    }
                 },
-                "required": ["id"]
+                "required": ["id"],
+                "additionalProperties": false
             }),
         },
         ToolDefinition {
             name: "list_tasks".into(),
-            description: "Retrieve a list of tasks matching specific filters. No confirmation needed.".into(),
+            description: "Retrieve current tasks from the local database when the answer depends on current task state not already present in context. Use filters when helpful. Read-only tool, so no confirmation is needed.".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "status": { "type": "string", "enum": ["todo", "in_progress", "done", "cancelled"] },
+                    "statuses": { "type": "array", "items": { "type": "string", "enum": ["todo", "in_progress", "done", "cancelled"] } },
+                    "exclude_statuses": { "type": "array", "items": { "type": "string", "enum": ["todo", "in_progress", "done", "cancelled"] } },
+                    "priorities": { "type": "array", "items": { "type": "string", "enum": ["low", "medium", "high", "urgent"] } },
                     "project_id": { "type": "string" },
-                    "priority": { "type": "string" }
-                }
+                    "category": { "type": "string" },
+                    "energy_levels": { "type": "array", "items": { "type": "string", "enum": ["deep_focus", "light", "admin", "errand"] } },
+                    "context_tags": { "type": "array", "items": { "type": "string", "enum": ["computer", "phone", "errands", "home", "anywhere"] } },
+                    "tags": { "type": "array", "items": { "type": "string" } },
+                    "due_before": {
+                        "type": "string",
+                        "description": "ISO 8601 date (YYYY-MM-DD)",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "due_after": {
+                        "type": "string",
+                        "description": "ISO 8601 date (YYYY-MM-DD)",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    }
+                },
+                "additionalProperties": false
             }),
         },
         ToolDefinition {
             name: "search_journal".into(),
-            description: "Search the journal for past entries using keyword or date range. No confirmation needed.".into(),
+            description: "Search past journal entries by keyword, optionally limited by a date range. Use when the user asks about prior thoughts, events, or themes and the answer requires historical journal content. Read-only tool, so no confirmation is needed.".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "query": { "type": "string", "description": "Search keyword" },
-                    "date_from": { "type": "string" },
-                    "date_to": { "type": "string" }
+                    "query": {
+                        "type": "string",
+                        "description": "Search keyword",
+                        "minLength": 3,
+                        "maxLength": 100
+                    },
+                    "date_from": {
+                        "type": "string",
+                        "description": "ISO 8601 date (YYYY-MM-DD)",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    },
+                    "date_to": {
+                        "type": "string",
+                        "description": "ISO 8601 date (YYYY-MM-DD)",
+                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
+                    }
                 },
-                "required": ["query"]
+                "required": ["query"],
+                "additionalProperties": false
             }),
         },
         ToolDefinition {
             name: "fetch_url".into(),
-            description: "Fetch and read the content of a specific public web URL. No confirmation needed.".into(),
+            description: "Fetch and read the content of a specific public HTTPS URL when the user explicitly asks you to inspect that exact URL. This is not a web search tool. It is read-only and should not be used for localhost, private-network, or non-HTTPS addresses.".into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "url": { "type": "string", "description": "The full HTTPS URL" }
+                    "url": {
+                        "type": "string",
+                        "description": "The full HTTPS URL",
+                        "pattern": "^https://.+$",
+                        "maxLength": 2048
+                    }
                 },
-                "required": ["url"]
+                "required": ["url"],
+                "additionalProperties": false
             }),
         },
     ]
@@ -224,11 +201,19 @@ pub async fn execute_tool_call(
     match name {
         // --- Confirmable Tools ---
         "create_task" | "update_task" | "complete_task" => {
+            if let Err(message) = validate_mutating_tool_args(name, &args) {
+                return Ok((call_id, json!({
+                    "status": "error",
+                    "code": "validation_failed",
+                    "message": message
+                })));
+            }
+
             let (tx, rx) = oneshot::channel();
             
             {
                 let mut pending = tool_state.pending_confirmations.lock().await;
-                pending.insert(call_id.clone(), ToolConfirmation { tx, call_id: call_id.clone() });
+                pending.insert(call_id.clone(), ToolConfirmation { tx });
             }
 
             // Emit pending event for UI
@@ -242,7 +227,7 @@ pub async fn execute_tool_call(
             // Wait for confirmation with 300s timeout (D-95)
             let confirmed = tokio::select! {
                 res = rx => res.unwrap_or(false),
-                _ = tokio::time::sleep(tokio::time::Duration::from_secs(300)) => {
+                _ = tokio::time::sleep(Duration::from_secs(300)) => {
                     let mut pending = tool_state.pending_confirmations.lock().await;
                     pending.remove(&call_id);
                     emit(app, AppEvent::AiConfirmTimeout {
@@ -254,41 +239,335 @@ pub async fn execute_tool_call(
             };
 
             if !confirmed {
-                return Ok((call_id, json!({ "status": "error", "message": "User declined the operation or it timed out." })));
+                return Ok((call_id, json!({
+                    "status": "cancelled",
+                    "message": "User declined the operation or it timed out after 300 seconds."
+                })));
             }
 
             // Execute actual logic
-            let res = crate::db::tasks::execute_ai_tool(app, name, args).await?;
-            Ok((call_id, res))
+            match crate::db::tasks::execute_ai_tool(app, name, args).await {
+                Ok(res) => Ok((call_id, res)),
+                Err(e) => Ok((call_id, json!({
+                    "status": "error",
+                    "code": "execution_failed",
+                    "message": e.to_string()
+                }))),
+            }
         }
 
         // --- Read-only Tools ---
         "list_tasks" => {
+            if let Err(message) = validate_list_tasks_args(&args) {
+                return Ok((call_id, json!({
+                    "status": "error",
+                    "code": "validation_failed",
+                    "message": message
+                })));
+            }
+
             emit(app, AppEvent::AiStatus("Searching for tasks...".into()));
             let conn_arc = app.state::<crate::AppState>().conn.clone();
             let conn = conn_arc.lock().await;
             
-            let filters = serde_json::from_value(args).unwrap_or_default();
+            let filters: crate::db::tasks::TaskListFilters = serde_json::from_value(args)
+                .map_err(|e| AppError::InvalidInput(format!("Invalid list_tasks arguments: {}", e)))?;
             let tasks = crate::db::tasks::list_tasks(&conn, filters)?;
-            Ok((call_id, json!(tasks)))
+            let compact = tasks.into_iter().map(|task| {
+                json!({
+                    "id": task.id,
+                    "title": task.title,
+                    "status": task.status,
+                    "priority": task.priority,
+                    "due_date": task.due_date,
+                    "project_id": task.project_id,
+                    "energy_level": task.energy_level,
+                })
+            }).collect::<Vec<_>>();
+            Ok((call_id, json!(compact)))
         }
         "search_journal" => {
+            if let Err(message) = validate_search_journal_args(&args) {
+                return Ok((call_id, json!({
+                    "status": "error",
+                    "code": "validation_failed",
+                    "message": message
+                })));
+            }
+
             emit(app, AppEvent::AiStatus("Searching journal entries...".into()));
             let conn_arc = app.state::<crate::AppState>().conn.clone();
             let conn = conn_arc.lock().await;
             
-            let query = args["query"].as_str().ok_or_else(|| AppError::InvalidInput("Missing query".into()))?;
-            let results = crate::db::journal::search_entries(&conn, query)?;
+            let filters: crate::db::journal::JournalSearchFilters = serde_json::from_value(args)
+                .map_err(|e| AppError::InvalidInput(format!("Invalid search_journal arguments: {}", e)))?;
+            let results = crate::db::journal::search_entries(&conn, &filters)?;
             Ok((call_id, json!(results)))
         }
         "fetch_url" => {
-            emit(app, AppEvent::AiStatus(format!("Fetching {}...", args["url"].as_str().unwrap_or("URL"))));
             let url = args["url"].as_str().ok_or_else(|| AppError::InvalidInput("Missing URL".into()))?;
-            let client = reqwest::Client::new();
-            let res = client.get(url).send().await.map_err(|e| AppError::AiError(e.to_string()))?;
-            let text = res.text().await.map_err(|e| AppError::AiError(e.to_string()))?;
-            Ok((call_id, json!({ "content": text.chars().take(5000).collect::<String>() })))
+
+            if let Err(message) = validate_url(url) {
+                return Ok((call_id, json!({
+                    "status": "error",
+                    "code": "invalid_url",
+                    "message": message
+                })));
+            }
+
+            emit(app, AppEvent::AiStatus(format!("Fetching {}...", truncate_url(url))));
+
+            let client = reqwest::Client::builder()
+                .timeout(Duration::from_secs(10))
+                .redirect(reqwest::redirect::Policy::limited(5))
+                .build()
+                .map_err(|e| AppError::AiError(e.to_string()))?;
+
+            match client.get(url).send().await {
+                Ok(response) => {
+                    if !response.status().is_success() {
+                        return Ok((call_id, json!({
+                            "status": "error",
+                            "code": "http_error",
+                            "message": format!("Server returned {}", response.status())
+                        })));
+                    }
+
+                    match response.text().await {
+                        Ok(text) => {
+                            let truncated = text.chars().take(5000).collect::<String>();
+                            Ok((call_id, json!({
+                                "status": "success",
+                                "url": url,
+                                "content": truncated,
+                                "truncated": text.chars().count() > 5000
+                            })))
+                        }
+                        Err(e) => Ok((call_id, json!({
+                            "status": "error",
+                            "code": "read_error",
+                            "message": format!("Could not read response body: {}", e)
+                        }))),
+                    }
+                }
+                Err(e) => {
+                    let code = if e.is_timeout() {
+                        "timeout"
+                    } else if e.is_connect() {
+                        "connection_failed"
+                    } else {
+                        "request_failed"
+                    };
+
+                    Ok((call_id, json!({
+                        "status": "error",
+                        "code": code,
+                        "message": format!("Request failed: {}", e)
+                    })))
+                }
+            }
         }
         _ => Err(AppError::InvalidInput(format!("Unknown tool: {}", name))),
+    }
+}
+
+fn validate_mutating_tool_args(tool_name: &str, args: &Value) -> Result<(), String> {
+    match tool_name {
+        "create_task" => {
+            let title = args["title"].as_str().ok_or_else(|| "Missing required field: title".to_string())?;
+            if title.trim().is_empty() {
+                return Err("Task title cannot be empty".into());
+            }
+            if title.len() > 100 {
+                return Err("Task title must be 100 characters or fewer".into());
+            }
+            if let Some(due_date) = args["due_date"].as_str() {
+                validate_iso_date("due_date", due_date)?;
+            }
+            Ok(())
+        }
+        "update_task" => {
+            let id = args["id"].as_str().ok_or_else(|| "Missing required field: id".to_string())?;
+            if id.len() < 6 {
+                return Err("Task ID must be at least 6 characters".into());
+            }
+            if args.as_object().map(|obj| obj.len()).unwrap_or_default() <= 1 {
+                return Err("At least one field to update must be provided".into());
+            }
+            if let Some(title) = args["title"].as_str() {
+                if title.trim().is_empty() {
+                    return Err("Updated task title cannot be empty".into());
+                }
+                if title.len() > 100 {
+                    return Err("Updated task title must be 100 characters or fewer".into());
+                }
+            }
+            if let Some(due_date) = args["due_date"].as_str() {
+                validate_iso_date("due_date", due_date)?;
+            }
+            Ok(())
+        }
+        "complete_task" => {
+            let id = args["id"].as_str().ok_or_else(|| "Missing required field: id".to_string())?;
+            if id.len() < 6 {
+                return Err("Task ID must be at least 6 characters".into());
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn validate_list_tasks_args(args: &Value) -> Result<(), String> {
+    if let Some(due_before) = args["due_before"].as_str() {
+        validate_iso_date("due_before", due_before)?;
+    }
+    if let Some(due_after) = args["due_after"].as_str() {
+        validate_iso_date("due_after", due_after)?;
+    }
+    Ok(())
+}
+
+fn validate_search_journal_args(args: &Value) -> Result<(), String> {
+    let query = args["query"].as_str().ok_or_else(|| "Missing required field: query".to_string())?;
+    let trimmed = query.trim();
+    if trimmed.len() < 3 {
+        return Err("Search query must be at least 3 characters".into());
+    }
+    if trimmed.len() > 100 {
+        return Err("Search query must be 100 characters or fewer".into());
+    }
+
+    if let Some(date_from) = args["date_from"].as_str() {
+        validate_iso_date("date_from", date_from)?;
+    }
+    if let Some(date_to) = args["date_to"].as_str() {
+        validate_iso_date("date_to", date_to)?;
+    }
+    Ok(())
+}
+
+fn validate_iso_date(field_name: &str, value: &str) -> Result<(), String> {
+    NaiveDate::parse_from_str(value, "%Y-%m-%d")
+        .map(|_| ())
+        .map_err(|_| format!("Invalid {} format. Use YYYY-MM-DD", field_name))
+}
+
+fn validate_url(url: &str) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err("URL must start with https://".into());
+    }
+
+    if url.len() > 2048 {
+        return Err("URL must be 2048 characters or fewer".into());
+    }
+
+    let lower = url.to_ascii_lowercase();
+    let blocked_prefixes = [
+        "https://localhost",
+        "https://127.",
+        "https://10.",
+        "https://192.168.",
+        "https://172.16.",
+        "https://172.17.",
+        "https://172.18.",
+        "https://172.19.",
+        "https://172.20.",
+        "https://172.21.",
+        "https://172.22.",
+        "https://172.23.",
+        "https://172.24.",
+        "https://172.25.",
+        "https://172.26.",
+        "https://172.27.",
+        "https://172.28.",
+        "https://172.29.",
+        "https://172.30.",
+        "https://172.31.",
+        "https://0.0.0.0",
+        "https://[::1]",
+        "https://[fc",
+        "https://[fd",
+        "https://[fe80",
+    ];
+
+    if blocked_prefixes.iter().any(|prefix| lower.starts_with(prefix)) {
+        return Err("Local and private-network URLs are not allowed".into());
+    }
+
+    Ok(())
+}
+
+fn truncate_url(url: &str) -> String {
+    const MAX_LEN: usize = 60;
+    if url.len() <= MAX_LEN {
+        return url.to_string();
+    }
+
+    format!("{}...", &url[..MAX_LEN - 3])
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn create_task_validation_rejects_blank_title() {
+        let result = validate_mutating_tool_args("create_task", &json!({
+            "title": "   "
+        }));
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn update_task_validation_requires_fields_to_change() {
+        let result = validate_mutating_tool_args("update_task", &json!({
+            "id": "abcdef"
+        }));
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn search_journal_validation_rejects_short_query() {
+        let result = validate_search_journal_args(&json!({
+            "query": "hi"
+        }));
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn list_tasks_validation_rejects_invalid_dates() {
+        let result = validate_list_tasks_args(&json!({
+            "due_before": "2026-99-99"
+        }));
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn validate_url_allows_public_https() {
+        let result = validate_url("https://example.com/article");
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn validate_url_blocks_localhost() {
+        let result = validate_url("https://localhost:11434/api/tags");
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn truncate_url_shortens_long_values() {
+        let url = "https://example.com/this/is/a/very/long/path/that/should/be/truncated/by/the-helper";
+        let truncated = truncate_url(url);
+
+        assert!(truncated.len() <= 60);
+        assert!(truncated.ends_with("..."));
     }
 }

@@ -253,3 +253,27 @@ nav {
   outline: none;
   border-color: var(--color-accent);
 }
+
+@media (max-width: 1500px) {
+  body {
+    grid-template-columns: var(--sidebar-left-w) 1fr 340px;
+  }
+
+  .journal-view-layout {
+    grid-template-columns: 240px 1fr;
+  }
+}
+
+@media (max-width: 1280px) {
+  body {
+    grid-template-columns: 180px 1fr 300px;
+  }
+
+  #main-content {
+    padding: 8px;
+  }
+
+  .journal-view-layout {
+    grid-template-columns: 220px 1fr;
+  }
+}

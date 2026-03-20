@@ -1,0 +1,128 @@
+.reports-view-layout {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    overflow: hidden;
+    background: var(--color-bg);
+}
+
+.reports-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 20px 24px;
+    border-bottom: 1px solid var(--color-border);
+}
+
+.reports-header h2 {
+    font-size: 18px;
+    font-weight: 600;
+}
+
+.reports-controls {
+    display: flex;
+    gap: 12px;
+}
+
+.reports-grid {
+    flex: 1;
+    overflow-y: auto;
+    padding: 24px;
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    grid-gap: 24px;
+    max-width: 1200px;
+    margin: 0 auto;
+    width: 100%;
+}
+
+.report-card {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: 8px;
+    padding: 20px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+}
+
+.report-card.full-width {
+    grid-column: span 2;
+}
+
+.report-card h3 {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--color-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+/* Metric Cards */
+.metric-row {
+    grid-column: span 2;
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 20px;
+}
+
+.metric-card {
+    text-align: center;
+    justify-content: center;
+}
+
+.metric-card .label {
+    font-size: 12px;
+    color: var(--color-muted);
+}
+
+.metric-card .value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--color-accent);
+}
+
+/* List Style */
+.report-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.report-list-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: rgba(255,255,255,0.03);
+    border-radius: 6px;
+    font-size: 13px;
+}
+
+.report-list-item .status {
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 4px;
+    background: var(--color-border);
+    color: var(--color-muted);
+}
+
+.report-list-item.healthy .status {
+    background: rgba(76, 175, 130, 0.15);
+    color: var(--color-success);
+}
+
+/* Chart Canvas Sizing */
+canvas {
+    max-height: 300px;
+    width: 100% !important;
+}
+
+.chart-fallback {
+    padding: 12px;
+    border-radius: 6px;
+    background: rgba(255,255,255,0.03);
+    color: var(--color-muted);
+    font-size: 13px;
+}

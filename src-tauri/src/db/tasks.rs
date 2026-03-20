@@ -91,6 +91,22 @@ pub fn create_task(conn: &Connection, task: &Task) -> Result<String, AppError> {
     Ok(task.id.clone())
 }
 
+pub fn normalize_task_project(conn: &Connection, task: &mut Task) -> Result<(), AppError> {
+    let project_id = task.project_id.clone().unwrap_or_else(|| "inbox".into());
+    task.project_id = Some(project_id.clone());
+
+    let project_name = if project_id == "inbox" {
+        "Inbox".to_string()
+    } else {
+        crate::db::projects::get_project(conn, &project_id)?
+            .ok_or_else(|| AppError::InvalidInput("Selected project does not exist".into()))?
+            .name
+    };
+
+    task.project = Some(project_name);
+    Ok(())
+}
+
 pub fn list_tasks(conn: &Connection, filters: TaskListFilters) -> Result<Vec<Task>, AppError> {
     let mut query = "SELECT * FROM tasks WHERE is_deleted = 0".to_string();
     let mut params_vals: Vec<rusqlite::types::Value> = Vec::new();
@@ -213,10 +229,15 @@ pub fn update_task_status(conn: &Connection, id: &str, status: &str) -> Result<(
     let now = Utc::now().to_rfc3339();
     let completed_at = if status == "done" { Some(now.clone()) } else { None };
     
-    conn.execute(
+    let rows = conn.execute(
         "UPDATE tasks SET status = ?1, updated_at = ?2, completed_at = ?3 WHERE id = ?4",
         params![status, now, completed_at, id],
     )?;
+
+    if rows == 0 {
+        return Err(AppError::NotFound("Task not found".into()));
+    }
+
     Ok(())
 }
 
@@ -275,7 +296,7 @@ pub fn get_task(conn: &Connection, id: &str) -> Result<Option<Task>, AppError> {
 
 pub fn update_task(conn: &Connection, task: &Task) -> Result<(), AppError> {
     let now = Utc::now().to_rfc3339();
-    conn.execute(
+    let rows = conn.execute(
         "UPDATE tasks SET 
             title = ?1, description = ?2, notes = ?3, status = ?4, priority = ?5,
             due_date = ?6, due_time = ?7, reminder_at = ?8, reminder_fired = ?9, recurrence = ?10,
@@ -312,6 +333,11 @@ pub fn update_task(conn: &Connection, task: &Task) -> Result<(), AppError> {
             task.id,
         ],
     )?;
+
+    if rows == 0 {
+        return Err(AppError::NotFound("Task not found".into()));
+    }
+
     Ok(())
 }
 
@@ -599,7 +625,7 @@ pub async fn execute_ai_tool(app: &tauri::AppHandle, name: &str, args: serde_jso
             let context_tag = args["context_tag"].as_str().map(|s| s.to_string());
 
             let now = Utc::now().to_rfc3339();
-            let task = Task {
+            let mut task = Task {
                 id: uuid::Uuid::new_v4().to_string(),
                 parent_task_id: None,
                 title,
@@ -633,6 +659,7 @@ pub async fn execute_ai_tool(app: &tauri::AppHandle, name: &str, args: serde_jso
             };
 
             let conn = conn_arc.lock().await;
+            normalize_task_project(&conn, &mut task)?;
             create_task(&conn, &task)?;
             
             crate::events::emit(app, crate::events::AppEvent::TaskCreated { 
@@ -661,6 +688,7 @@ pub async fn execute_ai_tool(app: &tauri::AppHandle, name: &str, args: serde_jso
             if let Some(d) = args["due_date"].as_str() { task.due_date = Some(d.to_string()); }
             
             task.updated_at = Utc::now().to_rfc3339();
+            normalize_task_project(&conn, &mut task)?;
             update_task(&conn, &task)?;
 
             crate::events::emit(app, crate::events::AppEvent::TaskUpdated { id: id.clone() });

@@ -167,3 +167,51 @@ pub fn log_ai_feedback(
     )?;
     Ok(())
 }
+
+pub fn save_analysis_result(
+    conn: &Connection,
+    result: &crate::ai::AnalysisResult,
+) -> Result<(), AppError> {
+    let now = Utc::now().to_rfc3339();
+    
+    // 1. Update the journal entry with summary and metadata
+    conn.execute(
+        "UPDATE journal_entries SET 
+            analysis_summary = ?1,
+            analysis_mood = ?2,
+            analysis_insights = ?3,
+            emotions = ?4,
+            last_analysed_at = ?5,
+            updated_at = ?5
+         WHERE id = ?6",
+        params![
+            result.summary,
+            result.mood,
+            serde_json::to_string(&result.insights).unwrap_or_default(),
+            serde_json::to_string(&result.emotions).unwrap_or_default(),
+            now,
+            result.id
+        ],
+    )?;
+
+    // 2. Clear old tasks from this analysis if needed? 
+    // Spec D-106 says analysis fires on save, but we should be careful about duplicates.
+    // For now, we trust the pipeline's deduplication.
+
+    // 3. Create tasks (D-19/D-95 require confirmation for AI writes, but 
+    // background analysis tasks are PERSISTED as PROPOSED_TASKS or similar?
+    // Looking at schema: proposed_task_log is for this purpose.
+    
+    for task in &result.tasks {
+        log_ai_feedback(
+            conn,
+            "analysis", // No conversation ID for background worker
+            Some(&result.id),
+            "proposed",
+            "task",
+            &serde_json::to_string(&task).unwrap_or_default()
+        )?;
+    }
+
+    Ok(())
+}

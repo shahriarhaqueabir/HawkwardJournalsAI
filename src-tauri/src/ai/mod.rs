@@ -48,22 +48,32 @@ pub struct AnalysisResult {
 }
 
 impl AnalysisResult {
-    pub fn from_raw(raw: RawAnalysis, id: String) -> Self {
+    pub fn from_raw(raw: RawAnalysis, id: String) -> Result<Self, String> {
+        let summary = clean(raw.summary);
+        if summary.is_empty() {
+            return Err("Analysis response is missing a summary".into());
+        }
+
+        let mood = clean(raw.mood);
+        if mood.is_empty() {
+            return Err("Analysis response is missing a mood".into());
+        }
+
         let tasks = raw.tasks.unwrap_or_default().into_iter().map(|t| {
             AnalysisResultTask {
-                title: t.title,
+                title: clean(t.title),
                 project_id: t.project_suggestion.unwrap_or_else(|| "inbox".into()),
             }
-        }).collect();
+        }).filter(|t| !t.title.is_empty()).collect();
 
-        Self {
+        Ok(Self {
             id,
-            summary: clean(raw.summary),
-            mood: clean(raw.mood),
-            emotions: raw.emotions.unwrap_or_default(),
+            summary,
+            mood,
+            emotions: raw.emotions.unwrap_or_default().into_iter().map(clean).filter(|s| !s.is_empty()).take(5).collect(),
             tasks,
-            insights: raw.insights.unwrap_or_default(),
-        }
+            insights: raw.insights.unwrap_or_default().into_iter().map(clean).filter(|s| !s.is_empty()).take(3).collect(),
+        })
     }
 }
 

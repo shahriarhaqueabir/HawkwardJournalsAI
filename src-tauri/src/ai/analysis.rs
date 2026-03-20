@@ -1,6 +1,81 @@
 use std::collections::{HashMap, VecDeque, HashSet};
 use tokio::sync::{Mutex, Notify};
 use crate::ai::AnalysisStatus;
+use crate::AppState;
+
+pub async fn start_analysis_worker(state: std::sync::Arc<AppState>) {
+    loop {
+        // D-112: Wait for the trigger (Notify one/all)
+        state.ai_state.notify.notified().await;
+
+        while let Some(entry_id) = {
+            let mut queue = state.ai_state.queue.lock().await;
+            queue.pop_front()
+        } {
+            // 1. Update status
+            {
+                let mut status_map = state.ai_state.status.lock().await;
+                status_map.insert(entry_id.clone(), AnalysisStatus::Processing);
+            }
+
+            // 2. Perform the analysis
+            if let Err(e) = perform_analysis(&state, &entry_id).await {
+                eprintln!("[AI] Analysis error for {}: {:?}", entry_id, e);
+                let mut status_map = state.ai_state.status.lock().await;
+                status_map.insert(entry_id.clone(), AnalysisStatus::Failed);
+                
+                crate::events::emit(&state.handle, crate::events::AppEvent::JournalAnalysisError {
+                    entry_id: entry_id.clone(),
+                    error: e.to_string(),
+                });
+            }
+
+            // 3. Remove from queued_ids
+            {
+                let mut ids = state.ai_state.queued_ids.lock().await;
+                ids.remove(&entry_id);
+            }
+        }
+    }
+}
+
+async fn perform_analysis(state: &AppState, entry_id: &str) -> Result<(), crate::error::AppError> {
+    // 1. Fetch content
+    let journal = {
+        let conn = state.conn.lock().await;
+        crate::db::journal::get_entry(&conn, entry_id)?
+    };
+
+    if let Some(entry) = journal {
+        // emit Processing event for frontend UI updates
+        crate::events::emit(&state.handle, crate::events::AppEvent::JournalAnalysisProcessing {
+            entry_id: entry_id.to_string(),
+        });
+
+        // 2. Call Ollama
+        let result = state.ollama.analyze_journal(&entry.content, entry_id.to_string()).await?;
+
+        // 3. Save to DB
+        {
+            let conn = state.conn.lock().await;
+            crate::db::ai::save_analysis_result(&conn, &result)?;
+        }
+        
+        // 4. Update status
+        {
+            let mut status_map = state.ai_state.status.lock().await;
+            status_map.insert(entry_id.to_string(), AnalysisStatus::Done);
+        }
+
+        // 5. Notify frontend
+        crate::events::emit(&state.handle, crate::events::AppEvent::JournalAnalysisCompleted {
+            entry_id: entry_id.to_string(),
+            result,
+        });
+    }
+    
+    Ok(())
+}
 
 pub const MAX_QUEUE: usize = 100;
 

@@ -15,6 +15,19 @@ use std::sync::Arc;
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
+fn ai_tool_confirmed_flag(tool_name: &str, result: &serde_json::Value) -> Option<i32> {
+    let is_mutating = matches!(tool_name, "create_task" | "update_task" | "complete_task");
+    if !is_mutating {
+        return None;
+    }
+
+    match result.get("status").and_then(|value| value.as_str()) {
+        Some("cancelled") | Some("error") => Some(0),
+        _ => Some(1),
+    }
+}
+
+#[derive(Clone)]
 pub struct AppState {
     pub conn: Arc<Mutex<Connection>>,
     pub data_dir: std::path::PathBuf,
@@ -39,15 +52,19 @@ async fn save_journal_entry(
         id
     };
 
-    let title = title
-        .map(|t| t.trim().to_string())
-        .filter(|t| !t.is_empty());
+    let title_clone = title.clone();
     let word_count = content.split_whitespace().count() as i64;
+
+    // D-112: Trigger Background Analysis (Check BEFORE moving content)
+    let should_analyze = state.ai_state.should_analyze(&entry_id, &content).await;
 
     let entry = db::journal::JournalEntry {
         id: entry_id.clone(),
-        title,
+        title: title_clone,
         content,
+        analysis_summary: None,
+        analysis_mood: None,
+        analysis_insights: "[]".into(),
         emotions: "".into(),
         tags: "".into(),
         last_analysis_conv_id: None,
@@ -59,12 +76,66 @@ async fn save_journal_entry(
 
     let conn = state.conn.lock().await;
     db::journal::upsert_entry(&conn, &entry)?;
+    drop(conn);
+
+    if should_analyze {
+        let mut queue = state.ai_state.queue.lock().await;
+        let mut queued_ids = state.ai_state.queued_ids.lock().await;
+
+        if queue.len() < ai::analysis::MAX_QUEUE && !queued_ids.contains(&entry_id) {
+            queue.push_back(entry_id.clone());
+            queued_ids.insert(entry_id.clone());
+            
+            // Wake up the background loop
+            state.ai_state.notify.notify_one(); 
+            
+            crate::events::emit(&state.handle, crate::events::AppEvent::JournalAnalysisQueued { 
+                entry_id: entry_id.clone() 
+            });
+        }
+    }
 
     crate::events::emit(&state.handle, crate::events::AppEvent::JournalSaved { 
         entry_id: entry_id.clone() 
     });
 
     Ok(entry_id)
+}
+
+#[tauri::command]
+async fn get_report_summary(
+    state: tauri::State<'_, AppState>,
+    days: i32,
+) -> Result<db::reports::ReportData, AppError> {
+    let conn = state.conn.lock().await;
+    db::reports::get_report_data(&conn, days)
+}
+
+#[tauri::command]
+async fn settings_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<db::settings::SettingItem>, AppError> {
+    let conn = state.conn.lock().await;
+    db::settings::list_settings(&conn)
+}
+
+#[tauri::command]
+async fn setting_get(
+    state: tauri::State<'_, AppState>,
+    key: String,
+) -> Result<Option<db::settings::SettingItem>, AppError> {
+    let conn = state.conn.lock().await;
+    db::settings::get_setting(&conn, &key)
+}
+
+#[tauri::command]
+async fn setting_set(
+    state: tauri::State<'_, AppState>,
+    key: String,
+    value: String,
+) -> Result<db::settings::SettingItem, AppError> {
+    let conn = state.conn.lock().await;
+    db::settings::set_setting(&conn, &key, &value)
 }
 
 #[tauri::command]
@@ -97,6 +168,60 @@ async fn journal_delete(
 }
 
 #[tauri::command]
+async fn journal_search(
+    state: tauri::State<'_, AppState>,
+    query: String,
+    date_from: Option<String>,
+    date_to: Option<String>,
+) -> Result<Vec<serde_json::Value>, AppError> {
+    let conn = state.conn.lock().await;
+    db::journal::search_entries(
+        &conn,
+        &db::journal::JournalSearchFilters {
+            query,
+            date_from,
+            date_to,
+        },
+    )
+}
+
+#[tauri::command]
+async fn journal_request_analysis(
+    state: tauri::State<'_, AppState>,
+    entry_id: String,
+) -> Result<(), AppError> {
+    let conn = state.conn.lock().await;
+    let exists = db::journal::get_entry(&conn, &entry_id)?.is_some();
+    drop(conn);
+
+    if !exists {
+        return Err(AppError::NotFound("Journal entry not found".into()));
+    }
+
+    let mut queue = state.ai_state.queue.lock().await;
+    let mut queued_ids = state.ai_state.queued_ids.lock().await;
+
+    if queue.len() >= ai::analysis::MAX_QUEUE {
+        return Err(AppError::AiError("Analysis queue is full".into()));
+    }
+
+    if !queued_ids.contains(&entry_id) {
+        queue.push_back(entry_id.clone());
+        queued_ids.insert(entry_id.clone());
+    }
+
+    state.ai_state.notify.notify_one();
+    crate::events::emit(
+        &state.handle,
+        crate::events::AppEvent::JournalAnalysisQueued {
+            entry_id,
+        },
+    );
+
+    Ok(())
+}
+
+#[tauri::command]
 async fn task_create(
     state: tauri::State<'_, AppState>,
     title: String,
@@ -117,7 +242,7 @@ async fn task_create(
         }
     }
 
-    let task = db::tasks::Task {
+    let mut task = db::tasks::Task {
         id: Uuid::new_v4().to_string(),
         parent_task_id,
         title,
@@ -150,6 +275,7 @@ async fn task_create(
         completed_at: None,
     };
 
+    db::tasks::normalize_task_project(&conn, &mut task)?;
     db::tasks::create_task(&conn, &task)?;
     
     // §8A: Return full Task object
@@ -223,7 +349,11 @@ async fn task_update(
     task: db::tasks::Task,
 ) -> Result<(), AppError> {
     let conn = state.conn.lock().await;
-    db::tasks::update_task(&conn, &task)
+    let mut task = task;
+    db::tasks::normalize_task_project(&conn, &mut task)?;
+    db::tasks::update_task(&conn, &task)?;
+    crate::events::emit(&state.handle, crate::events::AppEvent::TaskUpdated { id: task.id.clone() });
+    Ok(())
 }
 
 #[tauri::command]
@@ -344,125 +474,25 @@ pub fn run() {
                 ollama: ollama_client.clone(),
                 handle: handle.clone(),
             };
-            app.manage(app_state);
+            app.manage(app_state.clone());
 
-            // WORKER LOOP (Step 4 & 5)
-            let worker_handle = handle.clone();
+            // AI ANALYSIS WORKER (D-112: Deterministic Background Loop)
+            let state_arc = Arc::new(app_state);
             tauri::async_runtime::spawn(async move {
-                let state = worker_handle.state::<AppState>();
-                loop {
-                    // Wait for notification OR continue if items exist
-                    let items_in_queue = {
-                        let queue = state.ai_state.queue.lock().await;
-                        !queue.is_empty()
-                    };
-
-                    if !items_in_queue {
-                        state.ai_state.notify.notified().await;
-                    }
-                    
-                    // 2. Pop from queue with explicit type
-                    let entry_id: Option<String> = {
-                        let mut queue = state.ai_state.queue.lock().await;
-                        let mut queued_ids = state.ai_state.queued_ids.lock().await;
-                        
-                        if let Some(id) = queue.pop_front() {
-                            queued_ids.remove(&id);
-                            Some(id)
-                        } else {
-                            None
-                        }
-                    };
-
-                    if let Some(id) = entry_id {
-                        // 3. Fetch latest from DB (Source of Truth)
-                        let db_result = {
-                            let conn = state.conn.lock().await;
-                            db::journal::get_entry_by_id(&conn, &id)
-                        };
-
-                        match db_result {
-                            Ok(Some(entry)) => {
-                                // 4. Deduplication
-                                if state.ai_state.should_analyze(&id, &entry.content).await {
-                                    crate::events::emit(&worker_handle, crate::events::AppEvent::JournalAnalysisProcessing { entry_id: id.clone() });
-
-                                    // 5. Call Ollama (Dropped lock above)
-                                    match state.ollama.analyze_journal(&entry.content, id.clone()).await {
-                                        Ok(result) => {
-                                            // 6. Ghost Entry Check: Verify entry still exists before emitting
-                                            let exists = {
-                                                let conn = state.conn.lock().await;
-                                                db::journal::get_entry_by_id(&conn, &id).ok().flatten().is_some()
-                                            };
-
-                                            if exists {
-                                                crate::events::emit(&worker_handle, crate::events::AppEvent::JournalAnalysisCompleted {
-                                                    entry_id: id.clone(),
-                                                    result: result,
-                                                });
-                                            } else {
-                                                println!("[AI] Ghost Entry detected: {} was deleted during analysis.", id);
-                                                state.ai_state.status.lock().await.remove(&id);
-                                            }
-                                        }
-                                        Err(e) => {
-                                            // Handle "Model Not Found" or other fatal errors
-                                            let error_msg = e.to_string();
-                                            if error_msg.contains("not found") {
-                                                crate::events::emit(&worker_handle, crate::events::AppEvent::AiModelMissing { model: "llama3.2".into() });
-                                            }
-                                            
-                                            eprintln!("[AI] Analysis error for {}: {:?}", id, e);
-                                            state.ai_state.status.lock().await.insert(id.clone(), crate::ai::AnalysisStatus::Failed);
-                                            crate::events::emit(&worker_handle, crate::events::AppEvent::JournalAnalysisError { 
-                                                entry_id: id.clone(), 
-                                                error: error_msg 
-                                            });
-                                        }
-                                    }
-                                }
-                            }
-                            Ok(None) => println!("[AI] Warning: Entry {} disappeared before analysis", id),
-                            Err(e) => eprintln!("[AI] Database error during fetch: {:?}", e),
-                        }
-                    }
-                }
+                ai::analysis::start_analysis_worker(state_arc).await;
             });
 
-            // EVENT LISTENER (D-96: Unified app_event channel)
-            let listener_handle = handle.clone();
+            // Unified app_event listener
             app.listen("app_event", move |event: tauri::Event| {
-                if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
-                    // Trigger AI Analysis on JournalSaved
-                    if payload["type"] == "journal_saved" {
-                        if let Some(id) = payload["entry_id"].as_str() {
-                            let task_handle = listener_handle.clone();
-                            let id_clone = id.to_string();
-                            tauri::async_runtime::spawn(async move {
-                                let state = task_handle.state::<AppState>();
-                                let mut queue = state.ai_state.queue.lock().await;
-                                let mut queued_ids = state.ai_state.queued_ids.lock().await;
-
-                                if queue.len() >= crate::ai::analysis::MAX_QUEUE { return; }
-
-                                queue.retain(|existing_id| existing_id != &id_clone);
-                                queue.push_back(id_clone.clone());
-                                queued_ids.insert(id_clone);
-                                state.ai_state.notify.notify_one();
-                            });
-                        }
-                    }
-                }
+                // Future event handlers can go here
+                let _ = event; 
             });
 
             // Step 8 (D-109): Check for missed Monday weekly review
             let review_handle = handle.clone();
-            let review_conn = conn.clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                let conn = review_conn.lock().await;
-                let _ = crate::scheduler::weekly_report::maybe_run_weekly_review(&review_handle, &conn);
+                let _ = crate::scheduler::weekly_report::maybe_run_weekly_review(&review_handle).await;
             });
 
             // Step 9: Main application background scheduler worker
@@ -473,13 +503,13 @@ pub fn run() {
                 let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
                 loop {
                     interval.tick().await;
-                    let c = sched_conn.lock().await;
-
                     // 1. Weekly Review (Scheduled time check: Mon >= 08:00)
                     let now = chrono::Local::now();
                     if now.weekday() == chrono::Weekday::Mon && now.hour() >= 8 {
-                        let _ = crate::scheduler::weekly_report::maybe_run_weekly_review(&sched_handle, &c);
+                        let _ = crate::scheduler::weekly_report::maybe_run_weekly_review(&sched_handle).await;
                     }
+
+                    let c = sched_conn.lock().await;
 
                     // 2. Poll Sub-minute Tasks (Reminders)
                     let _ = crate::scheduler::reminders::poll_reminders(&sched_handle, &c);
@@ -494,11 +524,20 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             ollama_health_check,
             save_journal_entry,
+            journal_search,
+            journal_request_analysis,
+            get_report_summary,
+            settings_list,
+            setting_get,
+            setting_set,
             journal_get,
             journal_list,
             journal_delete,
             project_create,
+            project_get,
             project_list,
+            project_update,
+            project_delete,
             task_create,
             task_list,
             task_update_status,
@@ -592,7 +631,8 @@ async fn ai_chat(
         ai::client::ChatMessage {
             role: m.role,
             content: m.content,
-            tool_calls: m.tool_args.and_then(|a| serde_json::from_str(&a).ok()),
+            // D-94: never replay historical tool calls back into the next model turn
+            tool_calls: None,
         }
     }).collect();
 
@@ -665,11 +705,12 @@ async fn ai_chat(
                                             
                                             match ai::tools::execute_tool_call(&handle, &tool_state, name, args.clone()).await {
                                                 Ok((call_id, result)) => {
+                                                    let confirmed_flag = ai_tool_confirmed_flag(name, &result);
                                                     crate::events::emit(&handle, crate::events::AppEvent::AiToolResult {
                                                         call_id,
                                                         name: name.to_string(),
                                                         result: result.clone(),
-                                                        confirmed: true,
+                                                        confirmed: confirmed_flag.unwrap_or(1) == 1,
                                                     });
                                                     
                                                     let tool_msg = db::ai::AiMessage {
@@ -680,7 +721,8 @@ async fn ai_chat(
                                                         tool_name: Some(name.to_string()),
                                                         tool_args: None,
                                                         tool_result: Some(serde_json::to_string(&result).unwrap_or_default()),
-                                                        confirmed: Some(1), model: None, created_at: "".into(),
+                                                        confirmed: confirmed_flag,
+                                                        model: None, created_at: "".into(),
                                                     };
                                                     {
                                                         let conn = conn_arc.lock().await;
@@ -739,10 +781,16 @@ async fn ai_chat(
 
                                             match ai::tools::execute_tool_call(&handle, &tool_state, &name, args.clone()).await {
                                                 Ok((call_id, result)) => {
-                                                    crate::events::emit(&handle, crate::events::AppEvent::AiToolResult { call_id, name: name.clone(), result: result.clone(), confirmed: true });
+                                                    let confirmed_flag = ai_tool_confirmed_flag(&name, &result);
+                                                    crate::events::emit(&handle, crate::events::AppEvent::AiToolResult {
+                                                        call_id,
+                                                        name: name.clone(),
+                                                        result: result.clone(),
+                                                        confirmed: confirmed_flag.unwrap_or(1) == 1,
+                                                    });
                                                     let t_msg = db::ai::AiMessage {
                                                         id: Uuid::new_v4().to_string(), conversation_id: conv_id_clone.clone(), role: "tool".into(), content: serde_json::to_string(&result).unwrap_or_default(),
-                                                        tool_name: Some(name.clone()), tool_args: None, tool_result: Some(serde_json::to_string(&result).unwrap_or_default()), confirmed: Some(1), model: None, created_at: "".into(),
+                                                        tool_name: Some(name.clone()), tool_args: None, tool_result: Some(serde_json::to_string(&result).unwrap_or_default()), confirmed: confirmed_flag, model: None, created_at: "".into(),
                                                     };
                                                     { let conn = conn_arc.lock().await; let _ = db::ai::add_message(&conn, &t_msg); }
                                                     current_history.push(ai::client::ChatMessage { role: "tool".into(), content: serde_json::to_string(&result).unwrap_or_default(), tool_calls: None });
@@ -849,6 +897,33 @@ async fn project_list(
 ) -> Result<Vec<db::projects::Project>, AppError> {
     let conn = state.conn.lock().await;
     db::projects::list_projects(&conn)
+}
+
+#[tauri::command]
+async fn project_get(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<Option<db::projects::Project>, AppError> {
+    let conn = state.conn.lock().await;
+    db::projects::get_project(&conn, &id)
+}
+
+#[tauri::command]
+async fn project_update(
+    state: tauri::State<'_, AppState>,
+    project: db::projects::Project,
+) -> Result<(), AppError> {
+    let conn = state.conn.lock().await;
+    db::projects::update_project(&conn, &project)
+}
+
+#[tauri::command]
+async fn project_delete(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<bool, AppError> {
+    let conn = state.conn.lock().await;
+    db::projects::soft_delete_project(&conn, &id, &Utc::now().to_rfc3339())
 }
 
 #[tauri::command]

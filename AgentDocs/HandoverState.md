@@ -1,30 +1,70 @@
-# PersonalLifeOS: Codebase Handover State 
+# HawkwardJournalAI: Codebase Handover State
 **Date:** 2026-03-20
 
-## 1. What's Been Done
-The project has successfully reached the conclusion of Phase 2 (Tasks), laying down the foundational systems required for the full PersonalLifeOS experience.
-- **Phase 0 (Project Bootstrap)**: All boilerplate set up. Tauri v2 shell, `rusqlite bundled-full` integration with FTS5 virtual tables and strict `BEGIN/COMMIT` migrations. Event-based IPC is functioning.
-- **Phase 1 (Journal Module)**: Fully functional Journal CRUD with FTS5 search. `VirtualList` is functioning, complete with keyset-cursor pagination. Emotive tracking with `journal_emotions_flat` implemented. The background AI Analysis Pipeline is working natively without blocking the UI, correctly firing deduplication and debounce loops on save. 
-- **Phase 2 (Tasks Module)**: Robust Task Management suite completed. Includes standard CRUD and state transitions. Advanced components include the slide-in Task Detail panel ensuring the right AI sidebar remains unobscured. A Background Scheduler package reliably supports both recurring task generation (via a rolling chain concept) and 60-second floating toast reminder triggers.
-- **Architectural Enhancements**: Implemented an explicit reactive system to handle changes through a robust 100% typed Rust enum named `AppEvent` (D-96 compliant). The initial foundation for RLHF AI tuning established by logging suggestions into the `proposed_task_log`.
+## 1. Current Project State
 
-## 2. What's To Be Done Next
-The system is pivoting heavily onto Phase 3 and Phase 4, turning the static data repository into a reactive intelligence engine.
-- **Phase 3 (AI Chat & Tooling Engine)**: Need to finalize the LLM toolkit definitions so the thinking partner can successfully call `create_task`, `update_task`, `complete_task`, etc. Must ensure a rigid 300s validation timeout loop is adhered to prior to confirming AI modifications to SQLite (D-95). Complete the dynamic generation of Weekly Planning.
-- **Phase 4 (Analytical Reports)**: Six unique reports must be fully developed integrating Chart.js natively on the frontend along with markdown-rendered LLM analytical summaries. Requires hooking up complex `group by` queries matching `word_count`, `emotions`, and `energy_level` distributions temporally.
-- **Phase 5 (Settings/Backup Orchestration)**: Ensure seamless backup orchestration natively interacting with JSON extraction flows or raw SQLite WAL snapshot duplications. Finish toggles affecting the startup RAM contexts.
+HawkwardJournalAI has completed Phase 2 and is now in active Phase 3 hardening, with early Phase 4 scaffolding already present.
 
-## 3. Alignment Match Report
-A critical function of the development lifecycle is preserving structural compliance with `PersonalLifeOS_MASTER_SPEC_v1.6` and `PersonalLifeOS_SPEC_ADDENDUM_v1.7`.
+- **Phase 0 (Bootstrap)**: Tauri v2 shell, SQLite initialization, migration runner, and core app wiring are in place.
+- **Phase 1 (Journal)**: Journal CRUD, keyset pagination, FTS search, and background AI analysis are implemented. Analysis results now persist summary, mood, insights, emotions, and proposed-task records.
+- **Phase 2 (Tasks)**: Task CRUD, task detail editing, project-aware task creation, reminders, recurrence polling, attachments, and task-related events are implemented.
+- **Phase 3 (AI Chat & Tool Engine)**: AI chat is now materially functional. Prompt rules, tool definitions, typed tool-call handling, fallback parsing, confirmation-gated writes, and tool-result narration have all been hardened. The current tool surface is `create_task`, `update_task`, `complete_task`, `list_tasks`, `search_journal`, and `fetch_url`.
+- **Phase 4 (Reports)**: Backend report queries and frontend tab wiring exist, but the six reports are not yet complete as polished product features.
 
-### Highly Aligned ✅
-- **Database & Storage Core**: Standardized `BEGIN/COMMIT` database migrations explicitly respect D-97. FTS5 Virtual Tables properly utilize implicit Soft-Deletion triggers. 
-- **UI Strictness**: The UI consistently adheres to plain-text rendering properties for the Journal natively blocking unnecessary markdown interpreters (D-42). Right sidebar strict visibility is strictly maintained (D-78).
-- **Backend Design**: Employs the `rusqlite::backup::Backup` architecture eliminating file IO anomalies across the WAL stream. The background asynchronous scheduler appropriately isolates long-running tasks via `tokio::spawn` loops ensuring the GUI thread doesn't choke. Keyset pagination logic utilized effectively (D-104).
-- **Tooling Constraints**: Search correctly deferred to backlog (B-03), and tool sets are accurately limited to the local specification constraint (D-111).
+## 2. Most Recent Progress
 
-### Misalignments / Deviations ⚠️
-- **D-13 Violation (Projects)**: Specification D-13 explicitly states: *Task Project Field - Text field only*. However, recent commits show projects were functionally promoted to first-class entities (`Project > Task > Subtask`) utilizing dedicated CRUD routines in `src-tauri/src/db/projects.rs`. *Action Required*: Either correct the codebase to retreat back to standard text properties, or formally accept this feature enhancement up the specification chain to Version 1.8. 
-- **Validation Watchpoints**: 
-  - *D-40 Subtask Depth*: While backend handler enforces a maximum depth of 2 (Task -> Subtask), the frontend UX needs rigorous regression testing to ensure users cannot drag a subtask inside another subtask.
-  - *D-109 Weekly Review*: Confirm that the edge case firing mechanism for Monday startup explicitly waits the full 5 seconds (to allow React/UI propagation) before asserting via Tokio channels.
+Recent work moved the codebase from "Phase 3 shape exists" to "Phase 3 core behavior is substantially working":
+
+- Fixed scheduler/build regressions and stale tool-call replay issues in chat history.
+- Reworked chat and analysis prompts to better match the real tool surface and plain-text-first behavior.
+- Tightened tool contracts and validation in `src-tauri/src/ai/tools.rs`, including safer `fetch_url` handling and clearer schema definitions.
+- Made analysis parsing strict instead of silently fabricating fallback results on malformed model output.
+- Persisted `analysis_summary`, `analysis_mood`, and `analysis_insights` in `journal_entries`.
+- Repaired major frontend tab issues:
+  - Settings is now a usable tab backed by settings commands.
+  - Journal search works.
+  - Manual journal re-analysis is wired.
+  - The right AI sidebar initializes correctly and can send messages.
+  - AI chat no longer renders assistant markdown as raw HTML.
+  - Reports refresh on the actual emitted event set and show fallback copy when charts are unavailable.
+- Reviewed `AgentDocs/AIToolssuggestions.md` and implemented only the parts aligned with the current scope.
+- Performed a partial runtime validation pass:
+  - Live Tauri app launch verified.
+  - Local Ollama availability verified with `llama3.2:latest`.
+  - Tool validation tests added and passing.
+
+## 3. What Is Still Incomplete
+
+- Full manual in-window validation of AI chat tool flows, especially confirmation, cancellation, timeout, and post-tool narration behavior.
+- Final product-quality implementation of the six analytical reports.
+- Proper local loading of vendored frontend libraries like Chart.js and Marked.js for all intended report/chart experiences.
+- Remaining UI depth for timers, dependencies, fuller settings coverage, and some deeper CRUD surfaces.
+- Resolution of the D-13 spec deviation where Projects are currently implemented as first-class entities instead of remaining a task text field.
+
+## 4. Alignment Snapshot
+
+### Strongly Aligned
+
+- Typed `AppEvent` architecture is in place and actively used.
+- `journal_list` uses keyset pagination.
+- AI writes remain confirmation-gated with a 300-second auto-cancel rule.
+- Prompt/tool scope reflects the locked decision to keep tooling local and limited.
+- Analysis context and task injection have been compacted to preserve context budget.
+- Backup implementation uses `rusqlite::backup::Backup`.
+
+### Watchpoints / Deviations
+
+- **D-13**: Projects are still a real entity layer in the codebase.
+- **Phase 4 completeness**: Reports are scaffolded but not yet done.
+- **Validation gap**: Desktop runtime launch is verified, but complete human click-through validation of the AI UX is still outstanding.
+
+## 5. Recommended Next Step
+
+Run a true manual Tauri-window validation pass focused on the AI chat flows:
+
+- Plain-text small talk should not produce tool calls.
+- `create_task`, `update_task`, and `complete_task` should surface confirm/cancel UI correctly.
+- Cancelled or timed-out tool actions should remain uncommitted and be narrated accurately.
+- `list_tasks`, `search_journal`, and `fetch_url` should produce usable narration without exposing raw JSON.
+
+After that, move directly into finishing the six analytical reports and resolving any UI/runtime gaps uncovered by the validation pass.

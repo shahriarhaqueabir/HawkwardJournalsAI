@@ -1,75 +1,81 @@
-# 🎨 HawkwardJournalAI — Offline-First Desktop Productivity
+# HawkwardJournalAI
 
-**HawkwardJournalAI** is a private, offline-first Windows desktop application built with **Tauri v2**. It seamlessly combines a plain-text journal, a full task manager, and a local AI assistant powered by **Ollama**, allowing for secure, local processing of your personal data.
+HawkwardJournalAI is a private, offline-first Windows desktop app built with Tauri v2. It combines a plain-text journal, a task manager, and a local Ollama-powered thinking partner, with all user data stored locally in a single SQLite database.
 
----
+## Project Status
 
-## 🚀 Key Features
+Current phase: Phase 3 hardening, with Phase 2 complete and Phase 4 partially scaffolded.
 
-- **Private by Design**: All data stays on your machine in a single SQLite file.
-- **Journal-to-Task Pipeline**: Background AI analysis extracts actionable tasks from your journal entries.
-- **Local AI**: Powered by **Ollama (llama3.2)**—no internet required, no subscriptions.
-- **Task Management**: Full kanban/list views with subtasks and recurring reminders.
-- **Offline-First**: Zero dependencies on cloud services or external APIs (except local Ollama).
+What is working now:
 
----
+- Journal save/load flow with keyset pagination and FTS-backed search
+- Background journal analysis with deduplication and persisted summary, mood, insights, and proposed tasks
+- Task CRUD, task search, subtasks, reminders, recurrence polling, attachments, and project-aware task organization
+- Unified typed Rust-to-frontend event model through `AppEvent`
+- AI chat conversations with prompt hardening, built tool definitions, confirmation-gated writes, fallback tool parsing, and safer tool validation
+- Settings tab wiring and reports tab event refresh/fallback behavior
 
-## 🛠️ Tech Stack
+What is still incomplete:
 
-- **Backend**: Rust (Stable 1.77+, MSVC toolchain)
-- **Frontend**: Vanilla HTML + CSS + JS (Zero bundlers, zero frameworks)
-- **Desktop Shell**: Tauri v2
-- **Database**: SQLite (via `rusqlite` bundled-full)
-- **AI Engine**: Ollama (llama3.2) via REST API
+- Full manual in-window validation of every AI tool confirmation flow
+- The six analytical reports as fully finished report experiences
+- Proper vendored frontend library loading for every intended report/chart surface
+- Remaining UI coverage for timers, dependencies, fuller settings, and some deeper CRUD paths
+- Resolution of the D-13 spec deviation where Projects currently exist as first-class entities
 
----
+## Architecture
 
-## 📦 Getting Started
+- Desktop shell: Tauri v2
+- Backend: Rust + Tokio
+- Database: SQLite via `rusqlite` with `bundled-full`
+- Frontend: Vanilla HTML, CSS, and JavaScript
+- AI runtime: Ollama on `http://127.0.0.1:11434`
 
-### Prerequisites
+Important constraints:
 
-1.  **Rust**: Install via [rustup.rs](https://rustup.rs/).
-2.  **Ollama**: Download from [ollama.com](https://ollama.com/).
-3.  **Tauri Dependencies**: Follow the [Tauri v2 Windows setup guide](https://v2.tauri.app/start/prerequisites/).
+- No cloud sync, no accounts, no hosted AI
+- AI may read local data, but mutating AI actions require explicit user confirmation
+- Database backups must use `rusqlite::backup::Backup`, not raw file copies
+- Journal editor content remains plain text only
 
-### Initializing the AI
+## Running Locally
 
-Before running the app, ensure you have the required AI model installed:
+Prerequisites:
+
+- Rust toolchain with Windows/MSVC support
+- Tauri v2 Windows prerequisites
+- Ollama installed locally
+- `llama3.2` pulled in Ollama
+
+Pull the default model:
 
 ```bash
 ollama pull llama3.2
 ```
 
-### Running the App
+Run the desktop app from the Tauri crate:
 
 ```bash
-# Clone the repository
-git clone https://github.com/shahr/HawkwardJournalAI.git
-cd HawkwardJournalAI
+cd src-tauri
+cargo run
+```
 
-# Run in development mode
+If you prefer the Tauri CLI workflow and already have it installed:
+
+```bash
+cd src-tauri
 cargo tauri dev
 ```
 
----
+## Repository Layout
 
-## 🏗️ Project Structure
+- `src-tauri/`: Rust backend, DB layer, AI orchestration, schedulers, and migrations
+- `src/`: frontend shell, tabs, styles, and UI event handling
+- `AgentDocs/`: specs, handoff notes, and architecture/reference docs
+- `data/`, `backups/`, `attachments/`, `exports/`: local runtime storage folders
 
-- `src-tauri/`: Rust backend, database migrations, and AI orchestrator.
-- `src/`: Vanilla JS frontend, layout grid, and UI components.
-- `AgentDocs/`: Detailed system specifications and architectural blueprints.
-- `data/`: Local database storage (created on first run).
+## Notes For Contributors
 
----
-
-## 🔒 Security & Privacy
-
-- **No Cloud**: There is no "account" and no "sync." Your data is yours.
-- **Local Analytics**: AI processing happens entirely on your CPU/GPU via Ollama.
-- **Audit Logs**: All database mutations are tracked locally for your review.
-
----
-
-## 📜 License
-
-MIT License - Copyright (c) 2026.
+- Start with [AGENTS.md](e:/Abir/LocalCodeRepo/HawkwardJournalAI/AGENTS.md) before changing code
+- Use [CHANGELOG.md](e:/Abir/LocalCodeRepo/HawkwardJournalAI/CHANGELOG.md) as the session-by-session history
+- The canonical product/spec references live in `AgentDocs/HawkwardJournalAI_MASTER_SPEC_v1.6.md` and `AgentDocs/HawkwardJournalAI_SPEC_ADDENDUM_v1.7.md`

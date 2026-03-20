@@ -31,22 +31,32 @@ export function initTasks() {
   const detailEstimate = document.getElementById("detail-task-estimate");
   const detailUrl = document.getElementById("detail-task-url");
   const detailNotes = document.getElementById("detail-task-notes");
+  const subtaskList = document.getElementById("detail-task-subtasks");
+  const addSubtaskBtn = document.getElementById("btn-add-subtask");
   const attachmentList  = document.getElementById("detail-task-attachments");
   const addAttachBtn    = document.getElementById("btn-add-attachment");
   const showProjectModalBtn = document.getElementById("btn-show-new-project");
   const projectCreateModal = document.getElementById("modal-project");
   const saveProjectBtn = document.getElementById("btn-create-project-save");
+  const deleteProjectBtn = document.getElementById("btn-delete-project");
   const newProjectName = document.getElementById("new-project-name");
   const newProjectDesc = document.getElementById("new-project-desc");
+  const editProjectId = document.getElementById("edit-project-id");
+  const projectStatus = document.getElementById("project-status");
+  const projectGoalDate = document.getElementById("project-goal-date");
+  const projectColor = document.getElementById("project-color");
+  const projectManagementList = document.getElementById("project-management-list");
 
   if (!columns.todo) return;
 
   let currentTask = null;
+  let currentProjects = [];
+  let draggedTaskId = null;
+  let suppressClickUntil = 0;
 
   // Modals
   showProjectModalBtn?.addEventListener("click", () => {
-    newProjectName.value = "";
-    newProjectDesc.value = "";
+    resetProjectForm();
     projectCreateModal.classList.remove("hidden");
   });
 
@@ -62,20 +72,41 @@ export function initTasks() {
 
     try {
       const now = new Date().toISOString();
+      const isEditing = Boolean(editProjectId.value);
       const project = {
-        id: "p_" + Math.random().toString(36).slice(2, 11),
+        id: editProjectId.value || ("p_" + Math.random().toString(36).slice(2, 11)),
         name,
         description: newProjectDesc.value.trim() || null,
-        status: "active",
-        color: "#6c8ef7",
-        created_at: now,
+        status: projectStatus.value,
+        color: projectColor.value || "#6c8ef7",
+        goal_date: projectGoalDate.value || null,
+        created_at: isEditing ? (currentProjects.find(p => p.id === editProjectId.value)?.created_at || now) : now,
         updated_at: now
       };
-      await invoke("project_create", { project });
-      projectCreateModal.classList.add("hidden");
+      if (isEditing) {
+        await invoke("project_update", { project });
+      } else {
+        await invoke("project_create", { project });
+      }
+      resetProjectForm();
       await loadProjects();
     } catch (err) {
       console.error("Failed to create project:", err);
+    }
+  });
+
+  deleteProjectBtn?.addEventListener("click", async () => {
+    const id = editProjectId.value;
+    if (!id || id === "inbox") return;
+    if (!confirm("Delete this project? Tasks will be moved to Inbox.")) return;
+
+    try {
+      await invoke("project_delete", { id });
+      resetProjectForm();
+      await loadProjects();
+      await refreshTasks(searchInput.value);
+    } catch (err) {
+      console.error("Failed to delete project:", err);
     }
   });
 
@@ -107,6 +138,9 @@ export function initTasks() {
   async function loadProjects() {
     try {
       const projects = await invoke("project_list");
+      currentProjects = projects;
+      const currentFilter = projectFilter.value || "all";
+      const currentDetailProject = detailProject.value || "inbox";
       const inboxOpt = '<option value="inbox">Inbox</option>';
       const filterHtml = '<option value="all">All Projects</option>' + inboxOpt +
         projects.map(p => `<option value="${p.id}">${p.name}</option>`).join("");
@@ -115,9 +149,67 @@ export function initTasks() {
 
       projectFilter.innerHTML = filterHtml;
       detailProject.innerHTML = selectHtml;
+      projectFilter.value = [...projectFilter.options].some(opt => opt.value === currentFilter) ? currentFilter : "all";
+      detailProject.value = [...detailProject.options].some(opt => opt.value === currentDetailProject) ? currentDetailProject : "inbox";
+      renderProjectManagementList(projects);
     } catch (err) {
       console.error("Failed to load projects:", err);
     }
+  }
+
+  function resetProjectForm() {
+    editProjectId.value = "";
+    newProjectName.value = "";
+    newProjectDesc.value = "";
+    projectStatus.value = "active";
+    projectGoalDate.value = "";
+    projectColor.value = "#6c8ef7";
+    saveProjectBtn.textContent = "Create Project";
+    deleteProjectBtn.disabled = true;
+  }
+
+  function fillProjectForm(project) {
+    editProjectId.value = project.id;
+    newProjectName.value = project.name || "";
+    newProjectDesc.value = project.description || "";
+    projectStatus.value = project.status || "active";
+    projectGoalDate.value = project.goal_date || "";
+    projectColor.value = project.color || "#6c8ef7";
+    saveProjectBtn.textContent = "Save Project";
+    deleteProjectBtn.disabled = project.id === "inbox";
+    projectCreateModal.classList.remove("hidden");
+  }
+
+  function renderProjectManagementList(projects) {
+    if (!projectManagementList) return;
+    if (!projects || projects.length === 0) {
+      projectManagementList.innerHTML = '<div class="list-empty">No projects</div>';
+      return;
+    }
+
+    projectManagementList.innerHTML = projects.map(project => `
+      <div class="project-management-item">
+        <div class="project-management-main">
+          <div class="project-management-title">${escapeHtml(project.name)}</div>
+          <div class="project-management-meta">${escapeHtml(project.status)}${project.goal_date ? ` · ${escapeHtml(project.goal_date)}` : ""}</div>
+        </div>
+        <div class="project-management-actions">
+          <button class="btn-linkish" data-project-edit="${project.id}">Edit</button>
+        </div>
+      </div>
+    `).join("");
+
+    projectManagementList.querySelectorAll("[data-project-edit]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const id = btn.dataset.projectEdit;
+        try {
+          const project = await invoke("project_get", { id });
+          if (project) fillProjectForm(project);
+        } catch (err) {
+          console.error("Failed to load project:", err);
+        }
+      });
+    });
   }
 
   // --- ATTACHMENTS ---
@@ -224,14 +316,21 @@ export function initTasks() {
 
     // Item click -> Open Detail
     document.querySelectorAll(".task-item").forEach(item => {
-      item.addEventListener("click", () => openDetail(item.dataset.id));
+      item.addEventListener("click", () => {
+        if (Date.now() < suppressClickUntil) return;
+        openDetail(item.dataset.id);
+      });
       
       // Basic Drag and Drop (native)
       item.addEventListener("dragstart", (e) => {
+        draggedTaskId = item.dataset.id;
+        e.dataTransfer.effectAllowed = "move";
         e.dataTransfer.setData("text/plain", item.dataset.id);
         item.classList.add("dragging");
       });
       item.addEventListener("dragend", () => {
+        draggedTaskId = null;
+        suppressClickUntil = Date.now() + 200;
         item.classList.remove("dragging");
       });
     });
@@ -240,20 +339,111 @@ export function initTasks() {
     // Actually better to setup once in initTasks if possible, but cards are re-rendered.
   }
 
+  async function loadSubtasks(taskId) {
+    if (!subtaskList) return;
+
+    try {
+      const tasks = await invoke("task_list", { filters: { exclude_statuses: [] } });
+      const subtasks = tasks.filter(task => task.parent_task_id === taskId);
+      renderSubtasks(subtasks);
+    } catch (err) {
+      console.error("Failed to load subtasks:", err);
+      subtaskList.innerHTML = '<div class="subtask-empty">Failed to load subtasks</div>';
+    }
+  }
+
+  function renderSubtasks(subtasks) {
+    if (!subtaskList) return;
+    if (!subtasks || subtasks.length === 0) {
+      subtaskList.innerHTML = '<div class="subtask-empty">No subtasks</div>';
+      return;
+    }
+
+    subtaskList.innerHTML = subtasks.map((task) => `
+      <div class="subtask-item" data-subtask-id="${task.id}">
+        <input type="checkbox" class="task-toggle" ${task.status === "done" ? "checked" : ""} />
+        <div class="subtask-main">
+          <div class="subtask-title">${escapeHtml(task.title)}</div>
+          <div class="subtask-meta">${escapeHtml(task.status)}${task.due_date ? ` · ${escapeHtml(task.due_date)}` : ""}</div>
+        </div>
+        <div class="subtask-actions">
+          <button class="btn-linkish" data-subtask-open="${task.id}">Open</button>
+          <button class="btn-linkish" data-subtask-delete="${task.id}">Delete</button>
+        </div>
+      </div>
+    `).join("");
+
+    subtaskList.querySelectorAll("[data-subtask-open]").forEach((btn) => {
+      btn.addEventListener("click", () => openDetail(btn.dataset.subtaskOpen));
+    });
+
+    subtaskList.querySelectorAll("[data-subtask-delete]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        if (!confirm("Delete this subtask?")) return;
+        try {
+          await invoke("task_delete", { id: btn.dataset.subtaskDelete });
+          if (currentTask) {
+            await loadSubtasks(currentTask.id);
+            await refreshTasks(searchInput.value);
+          }
+        } catch (err) {
+          console.error("Failed to delete subtask:", err);
+        }
+      });
+    });
+
+    subtaskList.querySelectorAll(".task-toggle").forEach((checkbox) => {
+      checkbox.addEventListener("change", async (event) => {
+        const id = event.target.closest(".subtask-item").dataset.subtaskId;
+        const status = event.target.checked ? "done" : "todo";
+        try {
+          await invoke("task_update_status", { id, status });
+          if (currentTask) {
+            await loadSubtasks(currentTask.id);
+            await refreshTasks(searchInput.value);
+          }
+        } catch (err) {
+          console.error("Failed to update subtask status:", err);
+        }
+      });
+    });
+  }
+
   // Setup Column Drop Target once
   Object.entries(columns).forEach(([status, col]) => {
+    let dragDepth = 0;
+
+    col.addEventListener("dragenter", (e) => {
+      e.preventDefault();
+      dragDepth += 1;
+      col.classList.add("drag-over");
+    });
     col.addEventListener("dragover", (e) => {
       e.preventDefault();
+      e.dataTransfer.dropEffect = "move";
       col.classList.add("drag-over");
     });
     col.addEventListener("dragleave", () => {
-      col.classList.remove("drag-over");
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (dragDepth === 0) {
+        col.classList.remove("drag-over");
+      }
     });
     col.addEventListener("drop", async (e) => {
       e.preventDefault();
+      dragDepth = 0;
       col.classList.remove("drag-over");
-      const id = e.dataTransfer.getData("text/plain");
+      const id = e.dataTransfer.getData("text/plain") || draggedTaskId;
       if (id) {
+        const existingTask = document.querySelector(`.task-item[data-id="${id}"]`);
+        const currentStatus = existingTask?.closest(".column-items")?.id === "tasks-in-progress"
+          ? "in_progress"
+          : existingTask?.closest(".column-items")?.id?.replace("tasks-", "") || null;
+
+        if (currentStatus === status) {
+          return;
+        }
+
         await invoke("task_update_status", { id, status });
         refreshTasks(searchInput.value);
       }
@@ -280,9 +470,14 @@ export function initTasks() {
       detailEstimate.value = task.time_estimate || "";
       detailUrl.value = task.linked_url || "";
       detailNotes.value = task.notes || "";
+      addSubtaskBtn.disabled = Boolean(task.parent_task_id);
+      addSubtaskBtn.title = task.parent_task_id
+        ? "Subtasks can only be created one level deep"
+        : "Add a subtask";
 
       detailPanel.classList.remove("hidden");
       await loadAttachments(task.id);
+      await loadSubtasks(task.id);
     } catch (err) {
       console.error("Failed to get task details:", err);
     }
@@ -303,7 +498,11 @@ export function initTasks() {
 
   newTaskBtn.addEventListener("click", async () => {
     try {
-      const task = await invoke("task_create", { title: "New Task" });
+      const payload = { title: "New Task" };
+      if (projectFilter.value && projectFilter.value !== "all") {
+        payload.projectId = projectFilter.value;
+      }
+      const task = await invoke("task_create", payload);
       refreshTasks(searchInput.value);
       openDetail(task.id);
     } catch (err) {
@@ -352,6 +551,23 @@ export function initTasks() {
 
   closeDetailBtn.addEventListener("click", closeDetail);
 
+  addSubtaskBtn?.addEventListener("click", async () => {
+    if (!currentTask || currentTask.parent_task_id) return;
+
+    try {
+      const task = await invoke("task_create", {
+        title: "New Subtask",
+        parentTaskId: currentTask.id,
+        projectId: currentTask.project_id || "inbox"
+      });
+      await refreshTasks(searchInput.value);
+      await loadSubtasks(currentTask.id);
+      openDetail(task.id);
+    } catch (err) {
+      console.error("Failed to create subtask:", err);
+    }
+  });
+
   // --- ADD ATTACHMENT ---
   addAttachBtn.addEventListener("click", async () => {
     if (!currentTask) return;
@@ -383,4 +599,10 @@ export function initTasks() {
       }
     }
   };
+
+  function escapeHtml(text) {
+    const div = document.createElement("div");
+    div.textContent = text ?? "";
+    return div.innerHTML;
+  }
 }

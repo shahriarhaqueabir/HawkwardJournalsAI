@@ -45,13 +45,28 @@ async function loadConversations() {
 
         list.innerHTML = convs.map(c => `
             <div class="conversation-item ${c.id === currentConversationId ? 'active' : ''}" data-id="${c.id}">
-                <div class="conv-title">${c.title || 'Untitled Chat'}</div>
-                <div class="conv-meta">${new Date(c.updated_at).toLocaleDateString()}</div>
+                <div class="conversation-main">
+                    <div class="conv-title">${escapeHtml(c.title || 'Untitled Chat')}</div>
+                    <div class="conv-meta">${new Date(c.updated_at).toLocaleDateString()}</div>
+                </div>
+                <button class="conv-delete btn-icon btn-inline" data-delete-id="${c.id}" title="Delete conversation">×</button>
             </div>
         `).join("");
 
         list.querySelectorAll(".conversation-item").forEach(item => {
             item.addEventListener("click", () => selectConversation(item.dataset.id));
+        });
+        list.querySelectorAll("[data-delete-id]").forEach((button) => {
+            button.addEventListener("click", async (event) => {
+                event.stopPropagation();
+                const id = button.dataset.deleteId;
+                if (!confirm("Delete this conversation?")) return;
+                await invoke("ai_conversation_delete", { id });
+                if (currentConversationId === id) {
+                    startNewChat();
+                }
+                await loadConversations();
+            });
         });
     } catch (e) {
         console.error("Failed to load conversations:", e);
@@ -85,13 +100,8 @@ function renderMessages(msgs) {
 }
 
 function createMessageBubble(m) {
-    const roleClass = m.role === 'user' ? 'user-bubble' : 'ai-bubble';
-    let content = m.content;
-
-    // Basic markdown support for AI responses if marked is available
-    if (m.role === 'assistant' && window.marked) {
-        content = window.marked.parse(content);
-    }
+  const roleClass = m.role === 'user' ? 'user-bubble' : 'ai-bubble';
+  const content = escapeHtml(m.content);
 
     return `
         <div class="message-row ${m.role}">
@@ -152,6 +162,9 @@ function handleAiEvent(payload) {
     } else if (payload.type === "ai_tool_result") {
         showThinking(`Interpreting results from ${payload.name}...`);
         updateToolCard(payload);
+    } else if (payload.type === "ai_confirm_timeout") {
+        updateToolTimeoutCard(payload);
+        isTyping = false;
     } else if (payload.type === "ai_status") {
         showThinking(payload.message);
     }
@@ -199,13 +212,6 @@ function updateLastAiBubble(token, done) {
 
     const bubble = lastRow.querySelector(".ai-bubble");
     bubble.textContent += token;
-    
-    if (done) {
-        // Parse markdown if available
-        if (window.marked) {
-            bubble.innerHTML = window.marked.parse(bubble.textContent);
-        }
-    }
     
     messagesEl.scrollTop = messagesEl.scrollHeight;
 }
@@ -260,16 +266,44 @@ function updateToolCard(payload) {
         messagesEl.scrollTop = messagesEl.scrollHeight;
     }
 
+    const status = payload.result?.status;
+    const isError = status === "error";
+    const isCancelled = status === "cancelled" || payload.confirmed === false;
+    const heading = isError
+        ? `Tool Failed: ${payload.name}`
+        : isCancelled
+            ? `Tool Cancelled: ${payload.name}`
+            : `Tool Executed: ${payload.name}`;
+    const message = isError
+        ? escapeHtml(payload.result?.message || "The tool could not complete.")
+        : isCancelled
+            ? escapeHtml(payload.result?.message || "The action was cancelled.")
+            : "Action completed successfully. AI is interpreting the results...";
+
     if (card) {
         card.innerHTML = `
             <div class="tool-header">
-                <strong>Tool Executed: ${payload.name}</strong>
+                <strong>${heading}</strong>
             </div>
             <div class="tool-body">
-                <em>Action completed successfully. AI is interpreting the results...</em>
+                <em>${message}</em>
             </div>
         `;
     }
+}
+
+function updateToolTimeoutCard(payload) {
+    const card = document.getElementById(`tool-${payload.call_id}`);
+    if (!card) return;
+
+    card.innerHTML = `
+        <div class="tool-header">
+            <strong>Tool Cancelled: ${payload.tool_name}</strong>
+        </div>
+        <div class="tool-body">
+            <em>The confirmation request expired after 300 seconds.</em>
+        </div>
+    `;
 }
 
 function startNewChat() {
@@ -291,7 +325,7 @@ globalThis.jumpToAiChat = async (entryId) => {
         currentConversationId = await invoke("ai_chat", {
             conversationId: null,
             message: "Analyze the entry I was just looking at and help me plan my next steps.",
-            source: "journal_entry",
+            source: "ai_tab",
             entryId: entryId
         });
         
@@ -301,3 +335,9 @@ globalThis.jumpToAiChat = async (entryId) => {
         console.error("Failed to jump to AI chat:", e);
     }
 };
+
+function escapeHtml(text) {
+    const div = document.createElement("div");
+    div.textContent = text ?? "";
+    return div.innerHTML;
+}

@@ -9,6 +9,8 @@ export function initJournal() {
   const wordCountEl = document.getElementById("word-count");
   const btnNew = document.getElementById("btn-new-entry");
   const btnDelete = document.getElementById("btn-delete-entry");
+  const btnAnalyze = document.getElementById("btn-analyze");
+  const searchInput = document.getElementById("journal-search");
 
   if (!editor || !titleInput || !idInput || !statusEl || !listEl) {
     console.error("Journal UI elements missing.");
@@ -27,8 +29,12 @@ export function initJournal() {
   let lastSaved = { id: "", title: "", content: "" };
 
   // ── REFRESH LIST ────────────────────────────────
+  let searchDebounce = null;
+  let isSearchMode = false;
+
   async function refreshList(append = false) {
     if (isLoading) return;
+    if (isSearchMode) return;
     if (!append) {
       cursor = null;
       hasMore = true;
@@ -53,6 +59,28 @@ export function initJournal() {
     } catch (err) {
       isLoading = false;
       console.error("Failed to load journal list:", err);
+    }
+  }
+
+  async function searchEntries() {
+    const query = searchInput?.value?.trim() || "";
+    if (!query) {
+      isSearchMode = false;
+      refreshList(false);
+      return;
+    }
+
+    isLoading = true;
+    isSearchMode = true;
+    listEl.innerHTML = '<div class="list-loading">Searching...</div>';
+    try {
+      const results = await invoke("journal_search", { query });
+      renderSearchResults(results);
+    } catch (err) {
+      console.error("Failed to search journal:", err);
+      listEl.innerHTML = '<div class="entry-list-empty">Search failed.</div>';
+    } finally {
+      isLoading = false;
     }
   }
 
@@ -100,6 +128,28 @@ export function initJournal() {
         item.addEventListener("click", () => loadEntry(item.dataset.id));
         item.dataset.listened = "true";
       }
+    });
+  }
+
+  function renderSearchResults(entries) {
+    if (!entries || entries.length === 0) {
+      listEl.innerHTML = '<div class="entry-list-empty">No matching entries.</div>';
+      return;
+    }
+
+    listEl.innerHTML = entries.map((entry) => `
+      <div class="entry-item search-result ${idInput.value === entry.id ? "active" : ""}" data-id="${entry.id}">
+        <div class="entry-title ${entry.title ? "" : "untitled"}">${entry.title || "Untitled Entry"}</div>
+        <div class="entry-preview">${entry.snippet || "Match found in entry content."}</div>
+        <div class="entry-meta-row">
+          <span class="entry-date">${new Date(entry.created_at).toLocaleDateString()}</span>
+          <span class="entry-stats">Search result</span>
+        </div>
+      </div>
+    `).join("");
+
+    listEl.querySelectorAll(".entry-item").forEach((item) => {
+      item.addEventListener("click", () => loadEntry(item.dataset.id));
     });
   }
 
@@ -230,26 +280,27 @@ export function initJournal() {
     wordCountEl.textContent = `${count} words`;
   }
 
-  let lastEmitTime = 0;
-
   const triggerAutoSave = () => {
     statusEl.textContent = "Typing...";
     updateWordCount();
-    
-    // Step 4: Frontend Throttle - 500ms
-    const now = Date.now();
-    if (now - lastEmitTime > 500) {
-      const id = idInput.value;
-      if (id) {
-        // D-96: Emit typed event correctly
-        window.__TAURI__.event.emit('journal_analysis_queued', { id: id });
-        lastEmitTime = now;
-      }
-    }
 
     clearTimeout(saveTimeout);
     saveTimeout = setTimeout(save, 1500);
   };
+
+  async function requestAnalysis() {
+    await save();
+    const id = idInput.value;
+    if (!id) return;
+
+    statusEl.textContent = "Queuing analysis...";
+    try {
+      await invoke("journal_request_analysis", { entryId: id });
+    } catch (err) {
+      console.error("Failed to request analysis:", err);
+      statusEl.textContent = "Analysis error";
+    }
+  }
 
   // ── INFINITE SCROLL ─────────────────────────────
   listEl.addEventListener("scroll", () => {
@@ -286,6 +337,11 @@ export function initJournal() {
   titleInput.addEventListener("input", triggerAutoSave);
   btnNew?.addEventListener("click", createNewEntry);
   btnDelete?.addEventListener("click", deleteEntry);
+  btnAnalyze?.addEventListener("click", requestAnalysis);
+  searchInput?.addEventListener("input", () => {
+    clearTimeout(searchDebounce);
+    searchDebounce = setTimeout(searchEntries, 250);
+  });
 
   refreshList();
 }

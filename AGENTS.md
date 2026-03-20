@@ -12,11 +12,13 @@ HawkwardJournalAI is a private, offline-first Windows desktop productivity app b
 
 ## Current Build Status
 
-**Phase:** Phase 2 (Tasks) complete. Moving into Phase 3 (AI Chat & Tool Engine) and Phase 4 (Reports).
-**Last built:** Task Management CRUD, First-Class Project Entities, Reactive Event Model (D-96 AppEvent unification), Background Scheduler Suite (reminders & recurrence).
+**Phase:** Phase 3 (AI Chat & Tool Engine) hardening is actively in progress. Phase 2 is complete. Phase 4 (Reports) is partially wired but not feature-complete.
+**Last built:** Phase 3 prompt and tool-contract hardening, stricter analysis parsing, persisted analysis summary/mood/insights, AI chat safety fixes, frontend tab repair (Settings activation, journal search/re-analysis, sidebar wiring, reports event refresh), scoped review of `AIToolssuggestions.md`, safer `fetch_url`, and partial runtime validation of the live Tauri/Ollama stack.
 **Open issues:**
-- Implement Phase 3 AI tools execution (create_task, search_journal, etc.) with timeout cancellation (D-95).
-- Build the 6 Analytical Reports (Phase 4).
+- Complete full in-window manual validation of AI chat tool flows (`create_task`, `update_task`, `complete_task`, `list_tasks`, `search_journal`, `fetch_url`), especially confirm/cancel/timeout UX.
+- Build the 6 Analytical Reports (Phase 4) beyond the current backend/frontend scaffolding and fallback rendering.
+- Properly load vendored frontend libraries like Chart.js/Marked.js in all intended report surfaces instead of relying on fallback-only behavior.
+- Fill remaining task/settings UI gaps (timers, dependencies, fuller settings coverage, deeper CRUD surfaces).
 - Address D-13 spec violation (Projects recently implemented as first-class entity rather than a text field).
 **Spec files:** `AgentDocs/HawkwardJournalAI_MASTER_SPEC_v1.6.md` + `AgentDocs/HawkwardJournalAI_SPEC_ADDENDUM_v1.7.md`
 **Locked decisions:** D-01 through D-111 (111 total)
@@ -57,6 +59,7 @@ hawkwardjournalai/
 │   │   │   ├── migrations.rs        Sequential migration runner
 │   │   │   ├── journal.rs           journal_* + notebook_* handlers
 │   │   │   ├── tasks.rs             task_* + timer_* + attachment_* handlers
+│   │   │   ├── projects.rs          first-class project CRUD and list helpers
 │   │   │   ├── ai.rs                conversation_* + message_* + proposed_task_log
 │   │   │   ├── settings.rs          setting_get/set/seed
 │   │   │   ├── audit.rs             write() + archive_old_entries()
@@ -65,9 +68,9 @@ hawkwardjournalai/
 │   │   ├── ai/                      Layer 2: AI Orchestration
 │   │   │   ├── mod.rs               Module declarations (placeholder)
 │   │   │   ├── client.rs            OllamaClient — single Tokio Mutex
-│   │   │   ├── stream.rs            NDJSON parser + emit(AiToken)
-│   │   │   ├── tools.rs             6 tool definitions + ToolExecutor + 300s confirm timeout
-│   │   │   ├── prompt.rs            PromptComposer — 8 system prompt blocks
+│   │   │   ├── stream.rs            Reserved placeholder for stream helpers
+│   │   │   ├── tools.rs             6 built tools + validation + confirmation handling
+│   │   │   ├── prompt.rs            chat + analysis system prompts
 │   │   │   ├── analysis.rs          JournalAnalysisPipeline — latest-only dedup
 │   │   │   ├── keywords.rs          extract_keywords() stop-word filter
 │   │   │   └── fallback.rs          3-pattern regex fallback tool-call parser
@@ -86,7 +89,10 @@ hawkwardjournalai/
 │   │   │   ├── 002_fts_triggers.sql
 │   │   │   ├── 003_analysis_tracking.sql
 │   │   │   ├── 004_field_expansion.sql
-│   │   │   └── 005_settings_v16.sql
+│   │   │   ├── 005_settings_v16.sql
+│   │   │   ├── 006_projects.sql
+│   │   │   ├── 007_analytical_reports.sql
+│   │   │   └── 008_ai_analysis_fields.sql
 │   │   └── logger.rs                tracing → emit(LogEvent)
 ├── src/                             Frontend (WebView2)
 │   ├── index.html                   Root shell — CSS grid only
@@ -96,6 +102,8 @@ hawkwardjournalai/
 │   │   ├── components.css           Buttons, inputs, badges, chips
 │   │   ├── toast.css                Floating toast (position: fixed, bottom-right)
 │   │   ├── ai-chat.css              Analysis card, message bubbles
+│   │   ├── tasks.css                Task views, panels, and interaction styling
+│   │   ├── reports.css              Report layouts, chart wrappers, fallbacks
 │   │   ├── terminal.css             Terminal bar (optional)
 │   │   └── themes/dark.css          light.css
 │   ├── js/
@@ -194,13 +202,13 @@ hawkwardjournalai/
 
 ---
 
-## Database Tables (13 total)
+## Database Objects (13 tables + 1 view)
 
 `schema_migrations` · `notebooks` · `journal_entries` · `journal_fts` (virtual) · `journal_emotions_flat` (view) · `tasks` · `task_dependencies` · `task_attachments` · `time_logs` · `ai_conversations` · `ai_messages` · `app_settings` · `audit_log` · `proposed_task_log`
 
 ---
 
-## AI Tools (7 total)
+## AI Tools (6 built + 1 backlog placeholder)
 
 | Tool             | Confirmation required? | Notes                       |
 | ---------------- | ---------------------- | --------------------------- |

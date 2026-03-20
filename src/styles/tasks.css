@@ -249,6 +249,76 @@
   min-height: 24px;
 }
 
+.subtask-list,
+.project-management-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 32px;
+}
+
+.subtask-empty {
+  font-size: 12px;
+  color: var(--color-muted);
+  font-style: italic;
+}
+
+.subtask-item,
+.project-management-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: calc(var(--radius) / 2);
+}
+
+.subtask-item .task-toggle {
+  flex-shrink: 0;
+}
+
+.subtask-main,
+.project-management-main {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.subtask-title,
+.project-management-title {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.subtask-meta,
+.project-management-meta {
+  font-size: 11px;
+  color: var(--color-muted);
+}
+
+.subtask-actions,
+.project-management-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.btn-linkish {
+  background: transparent;
+  border: none;
+  color: var(--color-accent);
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0;
+}
+
 .attachment-empty {
   font-size: 12px;
   color: var(--color-muted);
@@ -306,4 +376,16 @@
   padding: 6px 10px;
   font-size: 12px;
   border-radius: calc(var(--radius) / 2);
+}
+
+@media (max-width: 1280px) {
+  .tasks-kanban {
+    grid-template-columns: repeat(2, 1fr);
+    height: auto;
+    overflow-y: auto;
+  }
+
+  .detail-panel {
+    width: 380px;
+  }
 }

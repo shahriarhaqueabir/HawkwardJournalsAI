@@ -76,3 +76,53 @@ pub fn get_project(conn: &Connection, id: &str) -> Result<Option<Project>, AppEr
         Err(e) => Err(AppError::Database(e.to_string())),
     }
 }
+
+pub fn update_project(conn: &Connection, project: &Project) -> Result<(), AppError> {
+    let rows = conn.execute(
+        "UPDATE projects
+         SET name = ?1, description = ?2, status = ?3, color = ?4, goal_date = ?5, updated_at = ?6
+         WHERE id = ?7 AND is_deleted = 0",
+        params![
+            project.name,
+            project.description,
+            project.status,
+            project.color,
+            project.goal_date,
+            project.updated_at,
+            project.id,
+        ],
+    )?;
+
+    if rows == 0 {
+        return Err(AppError::NotFound("Project not found".into()));
+    }
+
+    conn.execute(
+        "UPDATE tasks
+         SET project = ?1, updated_at = ?2
+         WHERE project_id = ?3 AND is_deleted = 0",
+        params![project.name, project.updated_at, project.id],
+    )?;
+
+    Ok(())
+}
+
+pub fn soft_delete_project(conn: &Connection, id: &str, updated_at: &str) -> Result<bool, AppError> {
+    if id == "inbox" {
+        return Err(AppError::InvalidInput("Inbox project cannot be deleted".into()));
+    }
+
+    conn.execute(
+        "UPDATE tasks
+         SET project_id = 'inbox', project = 'Inbox', updated_at = ?1
+         WHERE project_id = ?2 AND is_deleted = 0",
+        params![updated_at, id],
+    )?;
+
+    let rows = conn.execute(
+        "UPDATE projects SET is_deleted = 1, updated_at = ?1 WHERE id = ?2 AND is_deleted = 0",
+        params![updated_at, id],
+    )?;
+
+    Ok(rows > 0)
+}

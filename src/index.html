@@ -10,7 +10,8 @@
   <link rel="stylesheet" href="styles/components.css" />
   <link rel="stylesheet" href="styles/ai-chat.css" />
   <link rel="stylesheet" href="styles/tasks.css" />
-  <link rel="stylesheet" href="styles/themes/dark.css" />
+  <link rel="stylesheet" href="styles/reports.css" />
+  <link rel="stylesheet" id="theme-stylesheet" href="styles/themes/dark.css" />
   </head>
 <body>
   <div id="left-sidebar">
@@ -175,6 +176,15 @@
               <option value="inbox">Inbox</option>
             </select>
           </div>
+          <div class="form-group">
+            <span id="subtasks-label" class="form-label">Subtasks</span>
+            <div id="detail-task-subtasks" class="subtask-list" aria-labelledby="subtasks-label">
+              <div class="subtask-empty">No subtasks</div>
+            </div>
+            <button id="btn-add-subtask" class="btn-ghost btn-sm" type="button">
+              + Add Subtask
+            </button>
+          </div>
           <div class="form-row">
             <div class="form-group">
               <label for="detail-task-context">Context</label>
@@ -246,8 +256,109 @@
         </div>
       </div>
     </div>
-    <div id="tab-reports" class="tab-view">Reports Tab</div>
-    <div id="tab-settings" class="tab-view">Settings Tab</div>
+    <div id="tab-reports" class="tab-view">
+      <div class="reports-view-layout">
+        <header class="reports-header">
+          <h2>Analytical Insights</h2>
+          <div class="reports-controls">
+            <select id="report-range" title="Report Range">
+              <option value="7">Last 7 Days</option>
+              <option value="30">Last 30 Days</option>
+              <option value="90">Last 90 Days</option>
+            </select>
+            <button id="btn-refresh-reports" class="btn-ghost" title="Refresh Reports">↻ Refresh</button>
+          </div>
+        </header>
+        <div class="reports-grid">
+          <div class="metric-row">
+            <div class="report-card metric-card">
+               <span class="label">Completed Tasks</span>
+               <span id="stat-tasks-done" class="value">0</span>
+            </div>
+            <div class="report-card metric-card">
+               <span class="label">Journal Entries</span>
+               <span id="stat-journal-entries" class="value">0</span>
+            </div>
+            <div class="report-card metric-card">
+              <span class="label">Active Projects</span>
+              <span id="stat-active-projects" class="value">0</span>
+            </div>
+            <div class="report-card metric-card">
+              <span class="label">Avg Focus (min)</span>
+              <span id="stat-avg-focus" class="value">0</span>
+            </div>
+          </div>
+          
+          <div class="report-card chart-card full-width">
+             <h3>Productivity Trend</h3>
+             <canvas id="chart-productivity"></canvas>
+          </div>
+          
+          <div class="report-card chart-card">
+             <h3>Emotional Distribution</h3>
+             <canvas id="chart-emotions"></canvas>
+          </div>
+          <div class="report-card list-card">
+             <h3>Project Health</h3>
+             <div id="report-project-list" class="report-list">
+               <div class="report-list-item">
+                 <span>Loading projects...</span>
+               </div>
+             </div>
+          </div>
+          
+          <div class="report-card chart-card">
+             <h3>Energy Level Focus</h3>
+             <canvas id="chart-energy"></canvas>
+          </div>
+          <div class="report-card chart-card">
+             <h3>Time Allocation (hr)</h3>
+             <canvas id="chart-time"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div id="tab-settings" class="tab-view">
+      <div class="settings-view-layout">
+        <header class="settings-header">
+          <h2>Settings</h2>
+          <button id="btn-save-settings" class="btn-primary">Save Settings</button>
+        </header>
+        <div class="settings-grid">
+          <section class="settings-card">
+            <h3>AI</h3>
+            <div class="form-group">
+              <label for="setting-ai-model">Model</label>
+              <input type="text" id="setting-ai-model" placeholder="llama3.2:latest" />
+            </div>
+            <div class="form-group">
+              <label for="setting-ai-url">Ollama URL</label>
+              <input type="url" id="setting-ai-url" placeholder="http://localhost:11434" />
+            </div>
+            <div class="form-group">
+              <label for="setting-ai-context-window">Context Window</label>
+              <input type="number" id="setting-ai-context-window" min="1024" step="1024" />
+            </div>
+          </section>
+
+          <section class="settings-card">
+            <h3>Appearance</h3>
+            <div class="form-group">
+              <label for="setting-theme">Theme</label>
+              <select id="setting-theme">
+                <option value="dark">Dark</option>
+                <option value="light">Light</option>
+              </select>
+            </div>
+            <div class="form-group checkbox-row">
+              <label for="setting-terminal-visible">Show Terminal Bar</label>
+              <input type="checkbox" id="setting-terminal-visible" />
+            </div>
+            <p class="settings-note">Theme changes apply immediately. Terminal visibility is saved for later terminal UI work.</p>
+          </section>
+        </div>
+      </div>
+    </div>
   </main>
 
   <aside id="right-sidebar" aria-labelledby="sidebar-title">
@@ -257,6 +368,7 @@
     </div>
     <div class="chat-input-area">
       <textarea id="ai-chat-input" placeholder="Ask your partner..."></textarea>
+      <button id="btn-ai-sidebar-send" class="btn-primary" title="Send Message">Send</button>
     </div>
   </aside>
 
@@ -270,6 +382,7 @@
         <button class="btn-icon" data-modal-close>×</button>
       </header>
       <div class="modal-body">
+        <input type="hidden" id="edit-project-id" />
         <div class="form-group">
           <label for="new-project-name">Project Name</label>
           <input type="text" id="new-project-name" placeholder="e.g. Personal Growth" />
@@ -278,10 +391,37 @@
           <label for="new-project-desc">Description (Optional)</label>
           <textarea id="new-project-desc" rows="2" placeholder="What is this project about?"></textarea>
         </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="project-status">Status</label>
+            <select id="project-status">
+              <option value="active">Active</option>
+              <option value="completed">Completed</option>
+              <option value="archived">Archived</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="project-goal-date">Goal Date</label>
+            <input type="date" id="project-goal-date" />
+          </div>
+        </div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="project-color">Color</label>
+            <input type="color" id="project-color" value="#6c8ef7" />
+          </div>
+        </div>
+        <div class="form-group">
+          <label>Existing Projects</label>
+          <div id="project-management-list" class="project-management-list">
+            <div class="list-empty">No projects</div>
+          </div>
+        </div>
       </div>
       <div class="modal-footer">
+        <button id="btn-delete-project" class="btn-danger" type="button">Delete Project</button>
         <button class="btn-ghost" data-modal-close>Cancel</button>
-        <button id="btn-create-project-save" class="btn-primary">Create Project</button>
+        <button id="btn-create-project-save" class="btn-primary">Save Project</button>
       </div>
     </div>
   </div>

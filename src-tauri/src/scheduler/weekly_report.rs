@@ -1,6 +1,6 @@
 use chrono::{Datelike, Local, NaiveDate};
-use rusqlite::Connection;
-use tauri::AppHandle;
+use rusqlite::{params, Connection};
+use tauri::{AppHandle, Manager};
 use crate::error::AppError;
 
 /// Checks if the weekly review has already run for the current week.
@@ -30,8 +30,7 @@ pub fn has_review_run_this_week(conn: &Connection) -> bool {
     last_run.iso_week() == today.iso_week() && last_run.year() == today.year()
 }
 
-/// Core function to generate the weekly report and update the last run date.
-pub fn maybe_run_weekly_review(app: &AppHandle, conn: &Connection) -> Result<(), AppError> {
+pub async fn maybe_run_weekly_review(app: &AppHandle) -> Result<(), AppError> {
     let today = Local::now().date_naive();
     
     // Decision D-109: Only run on Mondays
@@ -39,28 +38,121 @@ pub fn maybe_run_weekly_review(app: &AppHandle, conn: &Connection) -> Result<(),
         return Ok(());
     }
 
-    if has_review_run_this_week(conn) {
-        return Ok(());
+    {
+        let state = app.state::<crate::AppState>();
+        let conn = state.conn.lock().await;
+        if has_review_run_this_week(&conn) {
+            return Ok(());
+        }
     }
 
-    println!("[SCHEDULER] Running missed weekly review for week of {}", today);
+    println!("[SCHEDULER] Running weekly review for week of {}", today);
     
-    // --- WORKER START (PHASE 4) ---
-    // TODO: Actual report generation logic will live here.
-    // For now, we just mark it as run.
+    // 1. Fetch data summary for the last 7 days
+    let report_data = {
+        let state = app.state::<crate::AppState>();
+        let conn = state.conn.lock().await;
+        crate::db::reports::get_report_data(&conn, 7)?
+    };
+
+    // 2. Format a prompt for the AI
+    let stats_text = format!(
+        "WEEKLY STATS:
+        - Tasks Completed: {}
+        - Journal Entries: {}
+        - Emotions: {}
+        - Projects: {} active
+        - Time Allocation: {}
+        ",
+        report_data.total_tasks_completed,
+        report_data.total_journal_entries,
+        report_data.emotions.iter().map(|e| e.emotion.clone()).collect::<Vec<_>>().join(", "),
+        report_data.projects.len(),
+        report_data.time_allocation.iter().map(|t| format!("{}: {}m", t.category, t.total_minutes)).collect::<Vec<_>>().join(", ")
+    );
+
+    // 3. Initiate AI Chat in WeeklyPlan mode
+    let state = app.state::<crate::AppState>();
+    let client = state.ollama.clone();
+
+    let conv_id = uuid::Uuid::new_v4().to_string();
+    let now_ts = Local::now().to_rfc3339();
+
+    // Create a special conversation for this review
+    {
+        let conn = state.conn.lock().await;
+        conn.execute(
+            "INSERT INTO ai_conversations (id, title, model, source, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                conv_id,
+                format!("Weekly Review: {}", today.format("%b %d, %Y")),
+                crate::ai::client::DEFAULT_MODEL,
+                "weekly_plan",
+                now_ts.clone(),
+                now_ts.clone()
+            ],
+        )?;
+    }
+
+    // Request the AI insight (Non-streaming for background)
+    let prompt = format!(
+        "Help me plan my next week based on these stats from last week:\n{}\n\nProvide 3-4 actionable insights or suggestions.",
+        stats_text
+    );
+
+    // We use a simple chat call (non-streaming)
+    let generated = match client.chat_single(&prompt, crate::ai::prompt::ChatMode::WeeklyPlan).await {
+        Ok(ai_response) => {
+            // Save AI message
+            let conn = state.conn.lock().await;
+            conn.execute(
+                "INSERT INTO ai_messages (id, conversation_id, role, content, model, created_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                params![
+                    uuid::Uuid::new_v4().to_string(),
+                    conv_id,
+                    "assistant",
+                    ai_response,
+                    crate::ai::client::DEFAULT_MODEL,
+                    Local::now().to_rfc3339()
+                ],
+            )?;
+            true
+        }
+        Err(e) => {
+            println!("[SCHEDULER] Weekly AI review failed: {:?}", e);
+            false
+        }
+    };
+
+    if !generated {
+        return Ok(());
+    }
     
     let now_date = today.format("%Y-%m-%d").to_string();
     let now_ts = Local::now().to_rfc3339();
     
-    conn.execute(
-        "UPDATE app_settings SET value = ?1, updated_at = ?2 WHERE key = 'weekly_review_last_run'",
-        rusqlite::params![now_date, now_ts],
-    )?;
+    {
+        let conn = state.conn.lock().await;
+        conn.execute(
+            "UPDATE app_settings SET value = ?1, updated_at = ?2 WHERE key = 'weekly_review_last_run'",
+            params![now_date, now_ts],
+        )?;
+    }
 
-    // Emit event for frontend toast
-    crate::events::emit(app, crate::events::AppEvent::SystemStatus { 
-        message: "Weekly review generated successfully.".into() 
-    });
+    crate::events::emit(
+        app,
+        crate::events::AppEvent::WeeklyReviewGenerated {
+            date: now_date.clone(),
+        },
+    );
+    crate::events::emit(
+        app,
+        crate::events::AppEvent::SystemStatus {
+            message: "Weekly AI review generated! Check the AI tab.".into(),
+        },
+    );
 
     Ok(())
 }

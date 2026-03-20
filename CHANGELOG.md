@@ -2,6 +2,147 @@
 
 ## 2026-03-20
 
+### Documentation Refresh For Current Progress
+
+- **Project Status Docs Updated**:
+  - Updated `AGENTS.md` so the current build status now reflects active Phase 3 hardening instead of describing AI tool execution as still unimplemented.
+  - Refreshed the file map in `AGENTS.md` to include the newer `db/projects.rs`, `tasks.css`, and `reports.css` entries, clarified the AI tool count, and corrected the database-object summary text.
+  - Rewrote `README.md` to describe the current delivered feature set, remaining gaps, realistic local run instructions, and present Phase 3 / Phase 4 status.
+  - Rewrote `AgentDocs/HandoverState.md` to replace the stale Phase 2-era handoff summary with the current HawkwardJournalAI status, recent Phase 3 progress, remaining gaps, and recommended next step.
+
+### Kanban Drag-And-Drop Hardening
+
+- **Tasks Tab UX Fixes**:
+  - Updated `src/js/tabs/tasks.js` to make kanban drag/drop more reliable.
+  - Prevented accidental task-detail opening immediately after a drag gesture.
+  - Added move semantics to the native drag payload and a fallback to the in-memory dragged task ID.
+  - Prevented unnecessary `task_update_status` writes when a task is dropped back into the same column.
+  - Stabilized the column hover state during drag with `dragenter` depth tracking to reduce flicker and premature `drag-over` removal.
+- **Verification**:
+  - `node --check src/js/tabs/tasks.js`
+
+### Project, Task, And Subtask CRUD Repairs
+
+- **Backend CRUD Integrity**:
+  - Added project update/delete support in `src-tauri/src/db/projects.rs` and exposed new Tauri commands in `src-tauri/src/lib.rs` (`project_get`, `project_update`, `project_delete`).
+  - Hardened task status updates and full task updates in `src-tauri/src/db/tasks.rs` so missing-task writes now fail instead of silently succeeding.
+  - Updated `src-tauri/src/lib.rs` so `task_update` emits the typed `TaskUpdated` event after successful saves.
+- **Project/Task Data Consistency**:
+  - Added task project normalization in `src-tauri/src/db/tasks.rs` so task records consistently store both `project_id` and the human-readable `project` name.
+  - Project renames now propagate the new project name to linked tasks, and project deletion moves linked tasks back to Inbox instead of leaving stale project references.
+- **Frontend CRUD Surface Improvements**:
+  - Expanded the existing project modal in `src/index.html` and `src/js/tabs/tasks.js` into a basic project management surface with create, edit, delete, status, color, and goal-date handling.
+  - Added a subtask section to the task detail panel with list/read support plus add, status-toggle, open, and delete actions, making subtask CRUD reachable from the UI.
+  - New tasks now respect the active project filter when created from the tasks tab.
+- **Verification**:
+  - `cargo check`
+  - `node --check src/js/tabs/tasks.js`
+
+### Phase 3 AI Tool Review And Scoped Hardening
+
+- **Reviewed `AgentDocs/AIToolssuggestions.md` Against Scope**:
+  - Accepted the parts that improve the existing Phase 3 tool engine without expanding the product surface: clearer tool contracts, safer input handling, confirmation-path hardening, and safer URL fetching.
+  - Rejected or skipped suggestion details that would add unsupported scope or misrepresent current capabilities, such as introducing unimplemented tool parameters, implying broader tool inventory, or pulling in unrelated execution/logging architecture.
+- **Tool Definition Hardening**:
+  - Updated `src-tauri/src/ai/tools.rs` so all 6 built tools expose stricter JSON schemas with `additionalProperties: false`, stronger date patterns, tighter string bounds, and more explicit usage guidance aligned to the project's actual capabilities.
+  - Kept tool descriptions consistent with the locked scope: no web search, no shell access, no file-system tools, and no extra Phase 3 features beyond the current tool set.
+- **Tool Execution Validation & Safety**:
+  - Added pre-execution validation for mutating tools and structured validation errors before confirmation prompts, preventing invalid AI proposals from reaching the user confirmation step.
+  - Added validation for `list_tasks` and `search_journal` date filters.
+  - Hardened `fetch_url` with HTTPS-only validation, local/private-network blocking, redirect limits, a 10-second timeout, HTTP/read error reporting, and explicit truncation metadata.
+- **Confirmation / Result Accuracy**:
+  - Updated `src-tauri/src/lib.rs` so mutating AI tool results are no longer always recorded as confirmed.
+  - Cancelled, timed-out, or validation/error results now persist with the correct confirmation state in `ai_messages` and emit more accurate `AiToolResult.confirmed` values to the frontend.
+- **AI Tab Feedback Polish**:
+  - Updated `src/js/tabs/ai.js` so tool cards now distinguish successful execution from cancellation, timeout, and error states instead of always showing success messaging.
+- **Verification**:
+  - `cargo check`
+  - `node --check src/js/tabs/ai.js`
+  - `cargo test ai::tools --lib`
+
+### Phase 3 Runtime Validation Pass
+
+- **Live Desktop Runtime Checks**:
+  - Launched the real Tauri desktop app from `src-tauri` and verified a live `hawkward-journal-ai.exe` process with a responsive `HawkwardJournalAI` window title.
+  - Confirmed the app was resolving and using the expected roaming data directory at `%APPDATA%\\HawkwardJournals` with the live `hawkward.db`/WAL files present.
+  - Confirmed local Ollama availability at `http://127.0.0.1:11434/api/tags` with `llama3.2:latest` present, so the AI runtime dependency is healthy.
+- **Focused Tool Flow Validation**:
+  - Added targeted unit tests in `src-tauri/src/ai/tools.rs` for the new guardrails covering blank task titles, missing update fields, invalid date filters, short journal queries, localhost URL blocking, public HTTPS URL acceptance, and URL truncation behavior.
+- **Known Limitation During Validation**:
+  - Full click-through UI automation inside the live Tauri/WebView2 window was not available in this environment, so the validation pass covered actual app launch/runtime prerequisites plus backend tool-contract behavior rather than claiming manual in-window interaction that was not possible here.
+
+### AI Prompt Upgrade From Design Review
+
+- **Chat Prompt Rewrite**:
+  - Reworked `src-tauri/src/ai/prompt.rs` to adopt a more structured prompt format with clearer persona, operational rules, tool whitelist, date handling, tool-result narration rules, mode instructions, and failure behavior.
+  - Preserved accuracy by correcting the design note's tool-count mismatch: the prompt now reflects the 6 currently built tools rather than claiming unavailable capabilities.
+- **Analysis Prompt Hardening**:
+  - Expanded the journal-analysis system prompt in `src-tauri/src/ai/prompt.rs` with stricter schema language, stronger task-extraction constraints, and a valid example payload for the analysis model.
+- **Verification**:
+  - `cargo check`
+
+### Frontend Tab Repair & Settings Wiring
+
+- **Settings Tab Activation**:
+  - Replaced the Settings placeholder in `src/index.html` with a usable settings form for AI model, Ollama URL, context window, theme, and terminal visibility.
+  - Added `src/js/tabs/settings.js` and wired it in `src/js/app.js`.
+  - Added backend settings commands in `src-tauri/src/lib.rs` plus CRUD helpers in `src-tauri/src/db/settings.rs` (`settings_list`, `setting_get`, `setting_set`).
+- **Journal UX Fixes**:
+  - Implemented journal search flow in `src/js/tabs/journal.js` using the new `journal_search` Tauri command.
+  - Added manual re-analysis support via `journal_request_analysis` instead of the previous dead Analyze button.
+  - Removed the raw frontend event emission path so journal analysis now stays on the typed `app_event` architecture.
+- **AI Surface Fixes**:
+  - Fixed the right sidebar selector in `src/js/ai-sidebar.js` so the always-mounted Thinking Partner panel initializes correctly.
+  - Added sidebar message sending and repaired `jumpToAiChat` to use the valid `ai_tab` source instead of an unsupported conversation source.
+  - Removed markdown/HTML rendering from AI chat bubbles in `src/js/tabs/ai.js`, keeping responses plain-text and aligned with project rules.
+  - Added conversation deletion controls to the AI conversation list.
+- **Reports & CSS Hardening**:
+  - Updated `src/js/tabs/reports.js` to refresh on actual emitted event types (`journal_saved`, `task_updated`, `task_created`, `task_completed`, `task_deleted`).
+  - Added graceful chart fallbacks when Chart.js is unavailable rather than silently rendering blank canvases.
+  - Normalized missing CSS variables in `src/styles/base.css` and added layout/settings/report responsiveness and fallback styling across `layout.css`, `components.css`, `ai-chat.css`, `tasks.css`, and `reports.css`.
+- **Verification**:
+  - `cargo check`
+  - `node --check src/js/app.js`
+  - `node --check src/js/tabs/journal.js`
+  - `node --check src/js/tabs/settings.js`
+  - `node --check src/js/tabs/ai.js`
+  - `node --check src/js/tabs/reports.js`
+  - `node --check src/js/ai-sidebar.js`
+
+### Phase 3 Prompt, Tool, and Analysis Contract Cleanup
+
+- **Prompt Refinement**:
+  - Reworked `src-tauri/src/ai/prompt.rs` to remove contradictory tool-use instructions and make the assistant's decision rules explicit.
+  - Tightened the analysis prompt to forbid vague/non-actionable tasks and reduce duplicate task extraction.
+- **Tool Contract Alignment**:
+  - Refactored `src-tauri/src/ai/tools.rs` so Ollama tool payloads are derived from a single `get_tool_definitions()` source of truth.
+  - Aligned `list_tasks` tool arguments with `TaskListFilters` (`statuses`, `exclude_statuses`, `priorities`, `project_id`, date ranges, energy/context filters).
+  - Updated `search_journal` to accept real date filters and validate structured arguments instead of silently ignoring unsupported fields.
+  - Reduced `list_tasks` tool responses to compact task summaries to improve narration quality and preserve context budget.
+- **Analysis Reliability**:
+  - Made `AnalysisResult::from_raw` in `src-tauri/src/ai/mod.rs` validate required fields and filter empty task/insight entries.
+  - Changed `src-tauri/src/ai/client.rs` to fail loudly on invalid analysis JSON/schema mismatches instead of silently fabricating a neutral fallback result.
+- **Analysis Persistence**:
+  - Extended `journal_entries` with persisted AI analysis fields (`analysis_summary`, `analysis_mood`, `analysis_insights`) via `src-tauri/migrations/008_ai_analysis_fields.sql`.
+  - Updated journal read/write paths in `src-tauri/src/db/journal.rs`, `src-tauri/src/db/ai.rs`, and `src-tauri/src/lib.rs` to store and retrieve richer AI analysis output.
+- **Verification**:
+  - `cargo check`
+  - `cargo test ai::analysis --lib`
+  - `cargo test db::migrations --lib`
+
+### Phase 3 Audit & Scheduler Fixes
+
+- **Build Fixes**:
+  - Fixed `src-tauri/src/scheduler/weekly_report.rs` imports for `rusqlite::params` and `tauri::Manager`.
+  - Removed the unused `AnalysisResult` import in `src-tauri/src/ai/analysis.rs`.
+- **Weekly Review Runtime Hardening**:
+  - Refactored `maybe_run_weekly_review` in `src-tauri/src/scheduler/weekly_report.rs` to acquire the SQLite mutex only for short DB operations instead of holding it across the async Ollama call.
+  - Fixed the background scheduler in `src-tauri/src/lib.rs` to actually await the Monday weekly review future.
+  - Weekly review completion is now recorded only after a successful AI response, preventing false "already ran" state after failures.
+  - Emitted the typed `WeeklyReviewGenerated` event in addition to the existing system status toast.
+- **AI Chat Context Safety**:
+  - Fixed `src-tauri/src/lib.rs` so historical assistant `tool_calls` are no longer re-injected into later chat turns, preventing stale tool replays from prior messages.
+
 ### Phase 3 AI Chat & Tool Engine Hardening
 
 - **AI Stream Logic Fixes**: 
@@ -110,4 +251,3 @@
 - App shell: route all invokes through wrapper + prevent tab-switch crash, added missing tab placeholders (`src/js/app.js`, `src/index.html`).
 - DB journal writes: persist `word_count` and normalize empty titles (`src-tauri/src/db/journal.rs`, `src-tauri/src/lib.rs`).
 - App name is official updated to HawkwardJournal. DB name is hawkward.db
-

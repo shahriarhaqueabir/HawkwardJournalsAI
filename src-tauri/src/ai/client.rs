@@ -153,15 +153,15 @@ impl OllamaClient {
                 AppError::AiError(format!("Empty or missing response field: {}", body))
             })?;
 
-        let raw: RawAnalysis = serde_json::from_str(response_text).unwrap_or(RawAnalysis {
-            summary: "Analysis failed to parse properly.".into(),
-            mood: "neutral".into(),
-            emotions: None,
-            tasks: None,
-            insights: None,
-        });
+        let raw: RawAnalysis = serde_json::from_str(response_text).map_err(|e| {
+            AppError::AiError(format!(
+                "Analysis response JSON did not match schema: {} | Raw: {}",
+                e, response_text
+            ))
+        })?;
 
-        Ok(AnalysisResult::from_raw(raw, id))
+        AnalysisResult::from_raw(raw, id)
+            .map_err(|e| AppError::AiError(format!("Analysis response validation failed: {}", e)))
     }
 
     pub async fn chat_stream(
@@ -232,6 +232,60 @@ impl OllamaClient {
         });
 
         Ok(flattened)
+    }
+
+    pub async fn chat_single(
+        &self,
+        prompt: &str,
+        mode: crate::ai::prompt::ChatMode,
+    ) -> Result<String, AppError> {
+        let url = format!("{}/{}", self.base_url, OLLAMA_CHAT_URL);
+        
+        // Build one-off prompt input for single turn
+        let input = crate::ai::prompt::PromptInput {
+            mode,
+            overdue_tasks: vec![],
+            today_tasks: vec![],
+            upcoming_tasks: vec![],
+            related_journal: vec![],
+            current_entry: None,
+        };
+        let system_prompt = crate::ai::prompt::build_system_prompt(&input);
+
+        let request = ChatRequest {
+            model: self.model.clone(),
+            messages: vec![
+                ChatMessage { role: "system".into(), content: system_prompt, tool_calls: None },
+                ChatMessage { role: "user".into(), content: prompt.into(), tool_calls: None },
+            ],
+            stream: false,
+            tools: None,
+            options: json!({
+                "temperature": 0.7,
+                "num_ctx": 16384
+            }),
+        };
+
+        let response = self.http
+            .post(&url)
+            .json(&request)
+            .send()
+            .await
+            .map_err(|e| AppError::AiError(format!("Chat connection failed: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Err(AppError::AiError(format!("Ollama error status: {}", response.status())));
+        }
+
+        let body: serde_json::Value = response.json().await
+            .map_err(|e| AppError::AiError(format!("Invalid response JSON: {}", e)))?;
+
+        let content = body.get("message")
+            .and_then(|m| m.get("content"))
+            .and_then(|c| c.as_str())
+            .ok_or_else(|| AppError::AiError("Missing content in Ollama response".into()))?;
+
+        Ok(content.to_string())
     }
 }
 
