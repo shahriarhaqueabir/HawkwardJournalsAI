@@ -2,7 +2,6 @@ use crate::error::AppError;
 use chrono::Utc;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
-use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
@@ -16,12 +15,15 @@ pub struct Task {
     pub due_date: Option<String>,
     pub due_time: Option<String>,
     pub reminder_at: Option<String>,
+    pub recurrence: Option<String>,
+    pub next_occurrence: Option<String>,
     pub time_estimate: Option<i32>,
     pub time_logged: i32,
     pub tags: String, // JSON array
     pub labels: String, // JSON array
     pub category: Option<String>,
-    pub project: Option<String>,
+    pub project: Option<String>, // Legacy text label
+    pub project_id: Option<String>, // New FK to projects table
     pub energy_level: Option<String>,
     pub context_tag: Option<String>,
     pub linked_url: Option<String>,
@@ -35,10 +37,10 @@ pub fn create_task(conn: &Connection, task: &Task) -> Result<String, AppError> {
     conn.execute(
         "INSERT INTO tasks (
             id, parent_task_id, title, description, status, priority, 
-            due_date, due_time, reminder_at, time_estimate, time_logged,
-            tags, labels, category, project, energy_level, context_tag, 
-            linked_url, ai_created, created_at, updated_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+            due_date, due_time, reminder_at, recurrence, next_occurrence,
+            time_estimate, time_logged, tags, labels, category, project, project_id,
+            energy_level, context_tag, linked_url, ai_created, created_at, updated_at
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24)",
         params![
             task.id,
             task.parent_task_id,
@@ -49,12 +51,15 @@ pub fn create_task(conn: &Connection, task: &Task) -> Result<String, AppError> {
             task.due_date,
             task.due_time,
             task.reminder_at,
+            task.recurrence,
+            task.next_occurrence,
             task.time_estimate,
             task.time_logged,
             task.tags,
             task.labels,
             task.category,
             task.project,
+            task.project_id,
             task.energy_level,
             task.context_tag,
             task.linked_url,
@@ -66,15 +71,23 @@ pub fn create_task(conn: &Connection, task: &Task) -> Result<String, AppError> {
     Ok(task.id.clone())
 }
 
-pub fn list_tasks(conn: &Connection, include_completed: bool) -> Result<Vec<Task>, AppError> {
-    let query = if include_completed {
-        "SELECT * FROM tasks WHERE is_deleted = 0 ORDER BY priority DESC, due_date ASC"
-    } else {
-        "SELECT * FROM tasks WHERE is_deleted = 0 AND status != 'done' AND status != 'cancelled' ORDER BY priority DESC, due_date ASC"
-    };
+pub fn list_tasks(conn: &Connection, exclude_statuses: Vec<String>) -> Result<Vec<Task>, AppError> {
+    let mut query = "SELECT * FROM tasks WHERE is_deleted = 0".to_string();
+    
+    if !exclude_statuses.is_empty() {
+        let placeholders: Vec<String> = exclude_statuses.iter().map(|_| "?".to_string()).collect();
+        query.push_str(&format!(" AND status NOT IN ({})", placeholders.join(",")));
+    }
+    
+    query.push_str(" ORDER BY priority DESC, due_date ASC");
 
-    let mut stmt = conn.prepare(query)?;
-    let rows = stmt.query_map([], |row| {
+    let mut stmt = conn.prepare(&query)?;
+    
+    // Convert Vec<String> to Vec<Value> for params
+    let params: Vec<rusqlite::types::Value> = exclude_statuses.into_iter().map(|s| rusqlite::types::Value::Text(s)).collect();
+    let params_refs: Vec<&dyn rusqlite::ToSql> = params.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
+
+    let rows = stmt.query_map(&*params_refs, |row| {
         Ok(Task {
             id: row.get(0)?,
             parent_task_id: row.get(1)?,
@@ -85,19 +98,22 @@ pub fn list_tasks(conn: &Connection, include_completed: bool) -> Result<Vec<Task
             due_date: row.get(6)?,
             due_time: row.get(7)?,
             reminder_at: row.get(8)?,
+            recurrence: row.get(21)?,
+            next_occurrence: row.get(22)?,
             time_estimate: row.get(10)?,
             time_logged: row.get(11)?,
             tags: row.get(13)?,
             labels: row.get(14)?,
             category: row.get(15)?,
             project: row.get(16)?,
-            energy_level: row.get(20)?,
-            context_tag: row.get(21)?,
-            linked_url: row.get(22)?,
-            ai_created: row.get::<_, i32>(24)? != 0,
-            created_at: row.get(26)?,
-            updated_at: row.get(27)?,
-            completed_at: row.get(28)?,
+            project_id: row.get(17)?,
+            energy_level: row.get(23)?,
+            context_tag: row.get(24)?,
+            linked_url: row.get(25)?,
+            ai_created: row.get::<_, i32>(27)? != 0,
+            created_at: row.get(31)?,
+            updated_at: row.get(32)?,
+            completed_at: row.get(33)?,
         })
     })?;
 
@@ -141,19 +157,22 @@ pub fn get_task(conn: &Connection, id: &str) -> Result<Option<Task>, AppError> {
             due_date: row.get(6)?,
             due_time: row.get(7)?,
             reminder_at: row.get(8)?,
+            recurrence: row.get(21)?,
+            next_occurrence: row.get(22)?,
             time_estimate: row.get(10)?,
             time_logged: row.get(11)?,
             tags: row.get(13)?,
             labels: row.get(14)?,
             category: row.get(15)?,
             project: row.get(16)?,
-            energy_level: row.get(20)?,
-            context_tag: row.get(21)?,
-            linked_url: row.get(22)?,
-            ai_created: row.get::<_, i32>(24)? != 0,
-            created_at: row.get(26)?,
-            updated_at: row.get(27)?,
-            completed_at: row.get(28)?,
+            project_id: row.get(17)?,
+            energy_level: row.get(23)?,
+            context_tag: row.get(24)?,
+            linked_url: row.get(25)?,
+            ai_created: row.get::<_, i32>(27)? != 0,
+            created_at: row.get(31)?,
+            updated_at: row.get(32)?,
+            completed_at: row.get(33)?,
         })
     });
 
@@ -169,10 +188,11 @@ pub fn update_task(conn: &Connection, task: &Task) -> Result<(), AppError> {
     conn.execute(
         "UPDATE tasks SET 
             title = ?1, description = ?2, status = ?3, priority = ?4,
-            due_date = ?5, due_time = ?6, reminder_at = ?7, time_estimate = ?8,
-            category = ?9, project = ?10, energy_level = ?11, context_tag = ?12,
-            linked_url = ?13, updated_at = ?14
-         WHERE id = ?15",
+            due_date = ?5, due_time = ?6, reminder_at = ?7, recurrence = ?8,
+            next_occurrence = ?9, time_estimate = ?10, category = ?11, 
+            project = ?12, project_id = ?13, energy_level = ?14, context_tag = ?15,
+            linked_url = ?16, updated_at = ?17
+         WHERE id = ?18",
         params![
             task.title,
             task.description,
@@ -181,9 +201,12 @@ pub fn update_task(conn: &Connection, task: &Task) -> Result<(), AppError> {
             task.due_date,
             task.due_time,
             task.reminder_at,
+            task.recurrence,
+            task.next_occurrence,
             task.time_estimate,
             task.category,
             task.project,
+            task.project_id,
             task.energy_level,
             task.context_tag,
             task.linked_url,
@@ -213,19 +236,22 @@ pub fn search_tasks(conn: &Connection, query: &str) -> Result<Vec<Task>, AppErro
             due_date: row.get(6)?,
             due_time: row.get(7)?,
             reminder_at: row.get(8)?,
+            recurrence: row.get(21)?,
+            next_occurrence: row.get(22)?,
             time_estimate: row.get(10)?,
             time_logged: row.get(11)?,
             tags: row.get(13)?,
             labels: row.get(14)?,
             category: row.get(15)?,
             project: row.get(16)?,
-            energy_level: row.get(20)?,
-            context_tag: row.get(21)?,
-            linked_url: row.get(22)?,
-            ai_created: row.get::<_, i32>(24)? != 0,
-            created_at: row.get(26)?,
-            updated_at: row.get(27)?,
-            completed_at: row.get(28)?,
+            project_id: row.get(17)?,
+            energy_level: row.get(23)?,
+            context_tag: row.get(24)?,
+            linked_url: row.get(25)?,
+            ai_created: row.get::<_, i32>(27)? != 0,
+            created_at: row.get(31)?,
+            updated_at: row.get(32)?,
+            completed_at: row.get(33)?,
         })
     })?;
 

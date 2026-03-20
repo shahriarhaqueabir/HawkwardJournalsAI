@@ -11,12 +11,10 @@ pub enum AppEvent {
         message: String,
     },
     StartupComplete,
-    JournalAnalysisQueued {
-        entry_id: String,
-    },
-    JournalAnalysisProcessing {
-        entry_id: String,
-    },
+    
+    // Journal Events
+    JournalAnalysisQueued { entry_id: String },
+    JournalAnalysisProcessing { entry_id: String },
     JournalAnalysisCompleted {
         entry_id: String,
         result: crate::ai::AnalysisResult,
@@ -25,8 +23,23 @@ pub enum AppEvent {
         entry_id: String,
         error: String,
     },
-    AiModelMissing {
-        model: String,
+    JournalSaved { entry_id: String },
+
+    // Task Events
+    TaskCreated { id: String, title: String },
+    TaskUpdated { id: String },
+    TaskCompleted { id: String },
+    TaskDeleted { id: String },
+
+    // Weekly Review
+    WeeklyReviewGenerated { date: String },
+
+    // AI & System
+    AiModelMissing { model: String },
+    SystemStatus { message: String },
+    DatabaseError {
+        operation: String,
+        error: String,
     },
 }
 

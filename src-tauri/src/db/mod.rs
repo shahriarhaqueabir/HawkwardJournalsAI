@@ -4,6 +4,7 @@ pub mod init;
 pub mod journal;
 pub mod migrations;
 pub mod paths;
+pub mod projects;
 pub mod reports;
 pub mod settings;
 pub mod tasks;

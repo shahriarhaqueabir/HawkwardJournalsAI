@@ -37,9 +37,28 @@ async function checkOllama() {
       statusEl.style.color = "#f44336";
     }
   } catch (e) {
+    console.warn("Ollama check failed:", e);
     statusEl.textContent = "🔴 Ollama offline";
   }
 }
+
+// Global Event Dispatcher (D-96)
+globalThis.__TAURI__.event.listen("app_event", (event) => {
+  const payload = event.payload;
+  
+  // 1. Pass to Journal Tab if mounted
+  if (globalThis.__JOURNAL_EVENT_HANDLER__) {
+    globalThis.__JOURNAL_EVENT_HANDLER__(payload);
+  }
+
+  // 2. Global handlers (Toasts, System Status)
+  if (payload.type === "system_status") {
+    console.info(`[System] ${payload.message}`);
+  }
+  if (payload.type === "database_error") {
+    console.error(`[DB Error] ${payload.operation}: ${payload.error}`);
+  }
+});
 
 // Initializations
 initJournal();

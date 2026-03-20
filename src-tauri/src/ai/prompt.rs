@@ -6,7 +6,12 @@ pub fn get_analysis_system_prompt() -> &'static str {
       \"summary\": \"A 1-2 sentence high-level summary (max 30 words).\",
       \"mood\": \"One-word sentiment (e.g., joyful, anxious, reflective, frustrated).\",
       \"emotions\": [\"List of identified emotions (max 5)\"],
-      \"tasks\": [\"Extract actionable tasks mentioned or implied in the text (max 5)\"],
+      \"tasks\": [
+        {
+          \"title\": \"Extract actionable task title\",
+          \"project_suggestion\": \"inbox or a specific project name if contextually clear\"
+        }
+      ],
       \"insights\": [\"Synthesis of patterns or realizations (max 3)\"]
     }
 

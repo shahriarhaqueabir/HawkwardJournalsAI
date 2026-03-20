@@ -15,28 +15,54 @@ export function initJournal() {
     return;
   }
 
+  // --- STATE ---
+  let cursor = null;
+  let isLoading = false;
+  let hasMore = true;
+  const PAGE_SIZE = 30;
+
   let saveTimeout = null;
   let isSaving = false;
   let pendingSave = false;
   let lastSaved = { id: "", title: "", content: "" };
 
   // ── REFRESH LIST ────────────────────────────────
-  async function refreshList() {
+  async function refreshList(append = false) {
+    if (isLoading) return;
+    if (!append) {
+      cursor = null;
+      hasMore = true;
+      listEl.innerHTML = '<div class="list-loading">Loading...</div>';
+    }
+    
+    isLoading = true;
     try {
-      const entries = await invoke("journal_list", { limit: 50 });
-      renderList(entries);
+      const entries = await invoke("journal_list", { 
+        cursor: cursor, 
+        limit: PAGE_SIZE 
+      });
+      
+      isLoading = false;
+      renderList(entries, append);
+      
+      if (entries.length < PAGE_SIZE) {
+        hasMore = false;
+      } else if (entries.length > 0) {
+        cursor = entries[entries.length - 1].created_at;
+      }
     } catch (err) {
+      isLoading = false;
       console.error("Failed to load journal list:", err);
     }
   }
 
-  function renderList(entries) {
-    if (!entries || entries.length === 0) {
+  function renderList(entries, append = false) {
+    if (!append && (!entries || entries.length === 0)) {
       listEl.innerHTML = '<div class="entry-list-empty">No entries yet.</div>';
       return;
     }
 
-    listEl.innerHTML = entries
+    const html = entries
       .map((entry) => {
         const title = entry.title || "Untitled Entry";
         const date = new Date(entry.created_at).toLocaleDateString(undefined, {
@@ -58,9 +84,22 @@ export function initJournal() {
       })
       .join("");
 
-    // Add click listeners
+    if (!append) {
+      listEl.innerHTML = html;
+    } else {
+      // Remove loading indicator if any
+      const loader = listEl.querySelector(".list-loading");
+      if (loader) loader.remove();
+      listEl.insertAdjacentHTML('beforeend', html);
+    }
+
+    // Add click listeners to new items
     listEl.querySelectorAll(".entry-item").forEach((item) => {
-      item.addEventListener("click", () => loadEntry(item.dataset.id));
+      // Avoid double listeners
+      if (!item.dataset.listened) {
+        item.addEventListener("click", () => loadEntry(item.dataset.id));
+        item.dataset.listened = "true";
+      }
     });
   }
 
@@ -202,7 +241,8 @@ export function initJournal() {
     if (now - lastEmitTime > 500) {
       const id = idInput.value;
       if (id) {
-        window.__TAURI__.event.emit('journal_analysis_queued', { id });
+        // D-96: Emit typed event correctly
+        window.__TAURI__.event.emit('journal_analysis_queued', { id: id });
         lastEmitTime = now;
       }
     }
@@ -210,6 +250,36 @@ export function initJournal() {
     clearTimeout(saveTimeout);
     saveTimeout = setTimeout(save, 1500);
   };
+
+  // ── INFINITE SCROLL ─────────────────────────────
+  listEl.addEventListener("scroll", () => {
+    if (!hasMore || isLoading) return;
+    
+    const { scrollTop, scrollHeight, clientHeight } = listEl;
+    if (scrollTop + clientHeight >= scrollHeight - 50) {
+      refreshList(true);
+    }
+  });
+
+  // ── APP EVENT HANDLER ───────────────────────────
+  // Handle cross-tab or background events
+  const handleAppEvent = (payload) => {
+    if (payload.type === "journal_analysis_completed" || payload.type === "journal_analysis_processing") {
+      // Update specific item in list if visible
+      const item = listEl.querySelector(`[data-id="${payload.entry_id}"]`);
+      if (item) {
+        if (payload.type === "journal_analysis_processing") {
+            item.classList.add("processing");
+        } else {
+            item.classList.remove("processing");
+            // If completed, maybe refresh the item's data (like word count or analysis dot)
+        }
+      }
+    }
+  };
+
+  // Export or attach to window for app.js to call
+  window.__JOURNAL_EVENT_HANDLER__ = handleAppEvent;
 
   // ── INIT ────────────────────────────────────────
   editor.addEventListener("input", triggerAutoSave);

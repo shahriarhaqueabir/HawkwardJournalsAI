@@ -1,6 +1,43 @@
 # Changelog
 
+## 2026-03-19
+
+### Task Management & AI Integration
+
+- **Task CRUD Implementation**: Completed backend handlers and frontend UI for task creation, listing, updating, and searching (`src-tauri/src/db/tasks.rs`, `src-tauri/src/lib.rs`, `src/js/tabs/tasks.js`).
+- **Task Detail Panel**: Implemented a slide-in detail panel for editing task properties including priority, status, due date, and energy levels (`src/index.html`, `src/styles/tasks.css`, `src/js/tabs/tasks.js`).
+- **AI-to-Task Quick Add**: Wired up "Add" buttons in the AI Analysis card to instantly create tasks from AI suggestions (`src/js/ai-sidebar.js`).
+- **Event-Driven UI**: Standardized "app_event" listener in `ai-sidebar.js` to handle all background analysis states (D-96 compliance).
+- **Bug Fixes**:
+  - Fixed "Ollama status" display in sidebar footer.
+  - Corrected task list styling and priority-based color coding.
+
+### Architectural Unification & Project Hierarchy
+
+- **Project Entities**: Promoted Projects to first-class entities (`Project > Task > Subtask`) with dedicated table and CRUD commands (`src-tauri/src/db/projects.rs`).
+- **Project Filtering**: Implemented frontend project filters and project-aware task creation (`src/js/tabs/tasks.js`, `src/index.html`).
+- **Reactive Event Model**: refactored system to be 100% event-driven. All major state changes (Save, Complete, Delete) emit typed events on a unified `app_event` channel (D-96).
+- **AI Sidebar Overhaul**: Redesigned AI thinking partner with premium aesthetics (`src/styles/ai-chat.css`) and structured action extraction.
+- **Intelligence Trigger**: Decoupled AI analysis from UI commands; the pipeline now triggers reactively on the `JournalSaved` event.
+- **AI Learning Loop**: Implemented the foundation for reinforcement learning by logging all user interactions (accept/reject) with AI suggestions to `proposed_task_log` (`src-tauri/src/db/ai.rs`).
+- **Recurrence Idempotency**: Added completion guards to prevent duplicate task generation on status retries (`src-tauri/src/lib.rs`).
+
+### Project Alignment & Recovery Loop (Phase 2)
+- **Backend API Standardization**: 
+  - `task_create` now correctly returns the complete Task object instead of ID string (Spec §8A).
+  - Enforced 2-level maximum subtask depth constraint natively in the Rust command handler (D-40).
+  - Shifted `task_list` filtering to granular `exclude_statuses: Vec<String>` from coarse `include_completed: bool`.
+- **UI Architecture Constraints**:
+  - Restructured Task Detail panel layout to use position absolute, ensuring the right AI Sidebar is strictly never obscured (D-23, D-78).
+  - Modernized JS handlers to accept updated API object outputs.
+- **Background Scheduler Suite**:
+  - Refactored recurrence to be an **Interval-Based Rolling Chain**, detaching generation from the UX "done" event (D-120). Checks automatically in background.
+  - Formally implemented `reminders.rs` worker that pushes system notifications, natively omitting un-fireable `idea`, `done`, and `cancelled` status states (D-113).
+  - Added primary 60s asynchronous runtime loop to `main` context.
+  - Restored 5-second delayed boot sequence to capture missed Weekly Reviews on Monday application launches (D-109).
+
 ## 2026-03-18
+
 ### AI Analysis Pipeline Hardening
 - **Event-Queue-Worker Architecture**: Implemented background analysis worker to decouple UI from AI latency (`src-tauri/src/lib.rs`).
 - **Memory Safety**:

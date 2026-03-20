@@ -1,7 +1,7 @@
 import { invoke } from "./ipc.js";
 
 export function initAiSidebar() {
-  const messagesEl = document.getElementById("ai-chat-messages");
+  const messagesEl = document.querySelector(".ai-chat-messages");
   const currentEntryId = document.getElementById("current-entry-id");
 
   if (!messagesEl) return;
@@ -89,8 +89,8 @@ export function initAiSidebar() {
           <ul class="task-suggestions">
             ${tasks.map(t => `
               <li>
-                <span>${t}</span>
-                <button class="btn-task-add" data-task="${t}">Add</button>
+                <span>${t.title}</span>
+                <button class="btn-task-add" data-task="${t.title}" data-project="${t.project_id}">Add</button>
               </li>
             `).join("")}
           </ul>
@@ -116,15 +116,17 @@ export function initAiSidebar() {
     messagesEl.querySelectorAll(".btn-task-add").forEach(btn => {
       btn.addEventListener("click", async () => {
         const title = btn.dataset.task;
+        const project_id = btn.dataset.project || "inbox";
         try {
           btn.disabled = true;
           btn.textContent = "...";
-          await invoke("task_create", { title });
+          await invoke("task_create", { title, project_id });
           btn.textContent = "✓ Added";
           btn.classList.add("added");
         } catch (err) {
           btn.textContent = "Error";
           btn.disabled = false;
+          throw err; // Rethrow so ipc.js/global handler can also see it if needed
         }
       });
     });

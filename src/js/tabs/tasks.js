@@ -1,9 +1,14 @@
 import { invoke } from "../ipc.js";
 
 export function initTasks() {
-  const listEl = document.getElementById("task-list-items");
+  const columns = {
+    todo: document.getElementById("tasks-todo"),
+    in_progress: document.getElementById("tasks-in-progress"),
+    done: document.getElementById("tasks-done")
+  };
   const searchInput = document.getElementById("task-search");
   const newTaskBtn = document.getElementById("btn-new-task");
+  const projectFilter = document.getElementById("task-project-filter");
   
   // Detail Panel Elements
   const detailPanel = document.getElementById("task-detail-panel");
@@ -19,33 +24,62 @@ export function initTasks() {
   const detailDate = document.getElementById("detail-task-date");
   const detailEnergy = document.getElementById("detail-task-energy");
   const detailProject = document.getElementById("detail-task-project");
+  const detailRecurrence = document.getElementById("detail-task-recurrence");
 
-  if (!listEl) return;
+  if (!columns.todo) return;
 
   // --- REFRESH / LIST ---
   async function refreshTasks(query = "") {
     try {
-      const tasks = query.trim() 
+      let tasks = query.trim() 
         ? await invoke("task_search", { query })
         : await invoke("task_list");
+
+      // Client-side project filter (could be backend later)
+      const filter = projectFilter.value;
+      if (filter !== "all") {
+        tasks = tasks.filter(t => t.project_id === filter);
+      }
+
       renderTasks(tasks);
     } catch (err) {
       console.error("Failed to load tasks:", err);
     }
   }
 
+  async function loadProjects() {
+    try {
+      const projects = await invoke("project_list");
+      const filterHtml = '<option value="all">All Projects</option>' + 
+        projects.map(p => `<option value="${p.id}">${p.name}</option>`).join("");
+      const selectHtml = projects.map(p => `<option value="${p.id}">${p.name}</option>`).join("");
+      
+      projectFilter.innerHTML = filterHtml;
+      detailProject.innerHTML = selectHtml;
+    } catch (err) {
+      console.error("Failed to load projects:", err);
+    }
+  }
+
   function renderTasks(tasks) {
+    // Clear columns
+    Object.values(columns).forEach(col => {
+      col.innerHTML = "";
+    });
+
     if (!tasks || tasks.length === 0) {
-      listEl.innerHTML = '<div class="list-empty">No tasks found.</div>';
+      Object.values(columns).forEach(col => {
+        col.innerHTML = '<div class="list-empty">No tasks</div>';
+      });
       return;
     }
 
-    listEl.innerHTML = tasks.map(task => {
+    tasks.forEach(task => {
       const priorityClass = `priority-${task.priority}`;
       const checked = task.status === 'done' ? 'checked' : '';
       
-      return `
-        <div class="task-item ${priorityClass}" data-id="${task.id}">
+      const html = `
+        <div class="task-item ${priorityClass}" data-id="${task.id}" draggable="true">
           <input type="checkbox" ${checked} class="task-toggle" title="Mark as done" />
           <div class="task-content">
             <div class="task-title">${task.title}</div>
@@ -56,11 +90,21 @@ export function initTasks() {
           </div>
         </div>
       `;
-    }).join("");
+
+      const targetCol = columns[task.status] || columns.todo;
+      targetCol.insertAdjacentHTML("beforeend", html);
+    });
+
+    // Add empty state if column became empty
+    Object.values(columns).forEach(col => {
+      if (col.innerHTML === "") {
+        col.innerHTML = '<div class="list-empty">No tasks</div>';
+      }
+    });
 
     // Toggle listener
-    listEl.querySelectorAll(".task-toggle").forEach(cb => {
-      cb.addEventListener("click", (e) => e.stopPropagation()); // Don't open panel when toggling
+    document.querySelectorAll(".task-toggle").forEach(cb => {
+      cb.addEventListener("click", (e) => e.stopPropagation());
       cb.addEventListener("change", async (e) => {
         const id = e.target.closest(".task-item").dataset.id;
         const newStatus = e.target.checked ? "done" : "todo";
@@ -70,10 +114,42 @@ export function initTasks() {
     });
 
     // Item click -> Open Detail
-    listEl.querySelectorAll(".task-item").forEach(item => {
+    document.querySelectorAll(".task-item").forEach(item => {
       item.addEventListener("click", () => openDetail(item.dataset.id));
+      
+      // Basic Drag and Drop (native)
+      item.addEventListener("dragstart", (e) => {
+        e.dataTransfer.setData("text/plain", item.dataset.id);
+        item.classList.add("dragging");
+      });
+      item.addEventListener("dragend", () => {
+        item.classList.remove("dragging");
+      });
     });
+
+    // Column drop listeners (setup once or keep if re-rendered?)
+    // Actually better to setup once in initTasks if possible, but cards are re-rendered.
   }
+
+  // Setup Column Drop Target once
+  Object.entries(columns).forEach(([status, col]) => {
+    col.addEventListener("dragover", (e) => {
+      e.preventDefault();
+      col.classList.add("drag-over");
+    });
+    col.addEventListener("dragleave", () => {
+      col.classList.remove("drag-over");
+    });
+    col.addEventListener("drop", async (e) => {
+      e.preventDefault();
+      col.classList.remove("drag-over");
+      const id = e.dataTransfer.getData("text/plain");
+      if (id) {
+        await invoke("task_update_status", { id, status });
+        refreshTasks(searchInput.value);
+      }
+    });
+  });
 
   // --- DETAIL PANEL ---
   async function openDetail(id) {
@@ -88,7 +164,9 @@ export function initTasks() {
       detailStatus.value = task.status;
       detailDate.value = task.due_date || "";
       detailEnergy.value = task.energy_level || "";
-      detailProject.value = task.project || "";
+      detailProject.value = task.project_id || "inbox";
+
+      detailRecurrence.value = task.recurrence || "";
 
       detailPanel.classList.remove("hidden");
     } catch (err) {
@@ -105,11 +183,15 @@ export function initTasks() {
     refreshTasks(e.target.value);
   });
 
+  projectFilter.addEventListener("change", () => {
+    refreshTasks(searchInput.value);
+  });
+
   newTaskBtn.addEventListener("click", async () => {
     try {
-      const id = await invoke("task_create", { title: "New Task" });
+      const task = await invoke("task_create", { title: "New Task" });
       refreshTasks(searchInput.value);
-      openDetail(id);
+      openDetail(task.id);
     } catch (err) {
       console.error("Failed to create task:", err);
     }
@@ -123,7 +205,7 @@ export function initTasks() {
       priority: detailPriority.value,
       status: detailStatus.value,
       due_date: detailDate.value || null,
-      due_time: null, // Placeholder
+      due_time: null,
       reminder_at: null,
       time_estimate: null,
       time_logged: 0,
@@ -131,11 +213,13 @@ export function initTasks() {
       labels: "[]",
       category: null,
       project: detailProject.value || null,
+      recurrence: detailRecurrence.value || null,
+      next_occurrence: null,
       energy_level: detailEnergy.value || null,
       context_tag: null,
       linked_url: null,
       ai_created: false,
-      created_at: "", // Backend handles some, but we need to satisfy struct
+      created_at: "", 
       updated_at: "",
       completed_at: null
     };
@@ -163,5 +247,5 @@ export function initTasks() {
   closeDetailBtn.addEventListener("click", closeDetail);
 
   // Initial load
-  refreshTasks();
+  loadProjects().then(() => refreshTasks());
 }

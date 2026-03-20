@@ -6,7 +6,7 @@ mod events;
 mod logger;
 mod scheduler;
 
-use tauri::{Manager, Emitter, Listener};
+use tauri::{Manager, Listener};
 use chrono::Utc;
 use db::paths::resolve_data_dir;
 use error::AppError;
@@ -20,6 +20,7 @@ pub struct AppState {
     pub data_dir: std::path::PathBuf,
     pub ai_state: Arc<ai::analysis::AnalysisState>,
     pub ollama: Arc<ai::client::OllamaClient>,
+    pub handle: tauri::AppHandle,
 }
 
 #[tauri::command]
@@ -53,6 +54,10 @@ async fn save_journal_entry(
 
     let conn = state.conn.lock().await;
     db::journal::upsert_entry(&conn, &entry)?;
+
+    crate::events::emit(&state.handle, crate::events::AppEvent::JournalSaved { 
+        entry_id: entry_id.clone() 
+    });
 
     Ok(entry_id)
 }
@@ -93,8 +98,20 @@ async fn task_create(
     parent_task_id: Option<String>,
     due_date: Option<String>,
     priority: Option<String>,
-) -> Result<String, AppError> {
+    project_id: Option<String>,
+) -> Result<db::tasks::Task, AppError> {
     let now = Utc::now().to_rfc3339();
+    let conn = state.conn.lock().await;
+
+    // --- D-40: Enforce Subtask Depth (2 levels max) ---
+    if let Some(ref pid) = parent_task_id {
+        if let Some(parent) = db::tasks::get_task(&conn, pid)? {
+            if parent.parent_task_id.is_some() {
+                return Err(AppError::InvalidInput("Maximum subtask depth (2 levels) reached.".into()));
+            }
+        }
+    }
+
     let task = db::tasks::Task {
         id: Uuid::new_v4().to_string(),
         parent_task_id,
@@ -111,27 +128,39 @@ async fn task_create(
         labels: "[]".into(),
         category: None,
         project: None,
+        project_id: Some(project_id.unwrap_or_else(|| "inbox".into())),
         energy_level: None,
         context_tag: None,
         linked_url: None,
+        recurrence: None,
+        next_occurrence: None,
         ai_created: false,
         created_at: now.clone(),
         updated_at: now,
         completed_at: None,
     };
 
-    let conn = state.conn.lock().await;
-    db::tasks::create_task(&conn, &task)
+    db::tasks::create_task(&conn, &task)?;
+    
+    // §8A: Return full Task object
+    crate::events::emit(&state.handle, crate::events::AppEvent::TaskCreated { 
+        id: task.id.clone(), 
+        title: task.title.clone() 
+    });
+
+    Ok(task)
 }
 
 #[tauri::command]
 async fn task_list(
     state: tauri::State<'_, AppState>,
-    include_completed: Option<bool>,
+    exclude_statuses: Option<Vec<String>>,
 ) -> Result<Vec<db::tasks::Task>, AppError> {
     let conn = state.conn.lock().await;
-    db::tasks::list_tasks(&conn, include_completed.unwrap_or(false))
+    let exclude = exclude_statuses.unwrap_or_else(|| vec!["done".into(), "cancelled".into()]);
+    db::tasks::list_tasks(&conn, exclude)
 }
+
 
 #[tauri::command]
 async fn task_update_status(
@@ -140,7 +169,24 @@ async fn task_update_status(
     status: String,
 ) -> Result<(), AppError> {
     let conn = state.conn.lock().await;
-    db::tasks::update_task_status(&conn, &id, &status)
+
+    match db::tasks::update_task_status(&conn, &id, &status) {
+        Ok(_) => {
+            if status == "done" {
+                crate::events::emit(&state.handle, crate::events::AppEvent::TaskCompleted { id });
+            } else {
+                crate::events::emit(&state.handle, crate::events::AppEvent::TaskUpdated { id });
+            }
+            Ok(())
+        },
+        Err(e) => {
+            crate::events::emit(&state.handle, crate::events::AppEvent::DatabaseError { 
+                operation: "task_update_status".into(), 
+                error: e.to_string() 
+            });
+            Err(e)
+        }
+    }
 }
 
 #[tauri::command]
@@ -195,17 +241,11 @@ async fn ollama_health_check() -> Result<bool, AppError> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let data_dir = resolve_data_dir();
-    let conn = db::init::initialise().expect("Failed to initialise database");
+    let conn_raw = db::init::initialise().expect("Failed to initialise database");
+    let conn = Arc::new(Mutex::new(conn_raw));
 
     let ollama_client = Arc::new(ai::client::OllamaClient::new("llama3.2".into()));
     let ai_state = Arc::new(ai::analysis::AnalysisState::new());
-
-    let app_state = AppState {
-        conn: Arc::new(Mutex::new(conn)),
-        data_dir,
-        ai_state,
-        ollama: ollama_client,
-    };
 
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
@@ -216,18 +256,32 @@ pub fn run() {
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
             Some(vec![]),
         ))
-        .manage(app_state)
-        .setup(|app| {
+        .setup(move |app| {
             let handle = app.handle().clone();
             
+            let app_state = AppState {
+                conn: conn.clone(),
+                data_dir: data_dir.clone(),
+                ai_state: ai_state.clone(),
+                ollama: ollama_client.clone(),
+                handle: handle.clone(),
+            };
+            app.manage(app_state);
+
             // WORKER LOOP (Step 4 & 5)
             let worker_handle = handle.clone();
             tauri::async_runtime::spawn(async move {
+                let state = worker_handle.state::<AppState>();
                 loop {
-                    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+                    // Wait for notification OR continue if items exist
+                    let items_in_queue = {
+                        let queue = state.ai_state.queue.lock().await;
+                        !queue.is_empty()
+                    };
 
-                    // 1. Lift state once per loop (Optimization)
-                    let state = worker_handle.state::<AppState>();
+                    if !items_in_queue {
+                        state.ai_state.notify.notified().await;
+                    }
                     
                     // 2. Pop from queue with explicit type
                     let entry_id: Option<String> = {
@@ -253,10 +307,6 @@ pub fn run() {
                             Ok(Some(entry)) => {
                                 // 4. Deduplication
                                 if state.ai_state.should_analyze(&id, &entry.content).await {
-                                    {
-                                        let mut status_map = state.ai_state.status.lock().await;
-                                        status_map.insert(id.clone(), crate::ai::AnalysisStatus::Processing);
-                                    }
                                     crate::events::emit(&worker_handle, crate::events::AppEvent::JournalAnalysisProcessing { entry_id: id.clone() });
 
                                     // 5. Call Ollama (Dropped lock above)
@@ -302,29 +352,62 @@ pub fn run() {
                 }
             });
 
-            // EVENT LISTENER (Step 2 & 6)
+            // EVENT LISTENER (D-96: Unified app_event channel)
             let listener_handle = handle.clone();
-            app.listen_any("journal_analysis_queued", move |event| {
+            app.listen("app_event", move |event| {
                 if let Ok(payload) = serde_json::from_str::<serde_json::Value>(event.payload()) {
-                    if let Some(id) = payload["id"].as_str() {
-                        let task_handle = listener_handle.clone();
-                        let id_clone = id.to_string();
-                        tauri::async_runtime::spawn(async move {
-                            let state = task_handle.state::<AppState>();
-                            let mut queue = state.ai_state.queue.lock().await;
-                            let mut queued_ids = state.ai_state.queued_ids.lock().await;
+                    // Trigger AI Analysis on JournalSaved
+                    if payload["type"] == "journal_saved" {
+                        if let Some(id) = payload["entry_id"].as_str() {
+                            let task_handle = listener_handle.clone();
+                            let id_clone = id.to_string();
+                            tauri::async_runtime::spawn(async move {
+                                let state = task_handle.state::<AppState>();
+                                let mut queue = state.ai_state.queue.lock().await;
+                                let mut queued_ids = state.ai_state.queued_ids.lock().await;
 
-                            // Memory Safety: Check MAX_QUEUE limit
-                            if queue.len() >= crate::ai::analysis::MAX_QUEUE {
-                                return;
-                            }
+                                if queue.len() >= crate::ai::analysis::MAX_QUEUE { return; }
 
-                            // Step 6: Backpressure - Move to back of queue if exists, or add new
-                            queue.retain(|existing_id| existing_id != &id_clone);
-                            queue.push_back(id_clone.clone());
-                            queued_ids.insert(id_clone);
-                        });
+                                queue.retain(|existing_id| existing_id != &id_clone);
+                                queue.push_back(id_clone.clone());
+                                queued_ids.insert(id_clone);
+                                state.ai_state.notify.notify_one();
+                            });
+                        }
                     }
+                }
+            });
+
+            // Step 8 (D-109): Check for missed Monday weekly review
+            let review_handle = handle.clone();
+            let review_conn = conn.clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                let conn = review_conn.lock().await;
+                let _ = crate::scheduler::weekly_report::maybe_run_weekly_review(&review_handle, &conn).await;
+            });
+
+            // Step 9: Main application background scheduler worker
+            let sched_handle = handle.clone();
+            let sched_conn = conn.clone();
+            tauri::async_runtime::spawn(async move {
+                use chrono::{Datelike, Timelike};
+                let mut interval = tokio::time::interval(tokio::time::Duration::from_secs(60));
+                loop {
+                    interval.tick().await;
+                    let c = sched_conn.lock().await;
+
+                    // 1. Weekly Review (Scheduled time check: Mon >= 08:00)
+                    let now = chrono::Local::now();
+                    if now.weekday() == chrono::Weekday::Mon && now.hour() >= 8 {
+                        let _ = crate::scheduler::weekly_report::maybe_run_weekly_review(&sched_handle, &c).await;
+                    }
+
+                    // 2. Poll Sub-minute Tasks (Reminders)
+                    let _ = crate::scheduler::reminders::poll_reminders(&sched_handle, &c).await;
+
+                    // 3. Poll Interval Recurrences (D-120)
+                    let _ = crate::scheduler::recurrence::poll_recurrences(&sched_handle, &c).await;
                 }
             });
 
@@ -336,6 +419,8 @@ pub fn run() {
             journal_get,
             journal_list,
             journal_delete,
+            project_create,
+            project_list,
             task_create,
             task_list,
             task_update_status,
@@ -346,4 +431,41 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+#[tauri::command]
+async fn project_create(
+    state: tauri::State<'_, AppState>,
+    project: db::projects::Project,
+) -> Result<String, AppError> {
+    let conn = state.conn.lock().await;
+    db::projects::create_project(&conn, &project)
+}
+
+#[tauri::command]
+async fn project_list(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<db::projects::Project>, AppError> {
+    let conn = state.conn.lock().await;
+    db::projects::list_projects(&conn)
+}
+
+#[tauri::command]
+async fn task_delete(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<bool, AppError> {
+    let conn = state.conn.lock().await;
+    match db::tasks::soft_delete(&conn, &id) {
+        Ok(res) => {
+            crate::events::emit(&state.handle, crate::events::AppEvent::TaskDeleted { id });
+            Ok(res)
+        },
+        Err(e) => {
+            crate::events::emit(&state.handle, crate::events::AppEvent::DatabaseError { 
+                operation: "task_delete".into(), 
+                error: e.to_string() 
+            });
+            Err(e)
+        }
+    }
 }

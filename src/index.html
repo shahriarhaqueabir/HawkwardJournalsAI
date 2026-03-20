@@ -72,17 +72,41 @@
         <header class="tasks-header">
           <div class="header-main">
             <h2>Active Tasks</h2>
-            <div class="task-search-box">
-              <input type="text" id="task-search" placeholder="Search tasks..." />
+            <div class="task-controls">
+              <div class="task-search-box">
+                <input type="text" id="task-search" placeholder="Search tasks..." />
+              </div>
+              <div class="task-filter-box">
+                <select id="task-project-filter" title="Filter by Project">
+                  <option value="all">All Projects</option>
+                  <option value="inbox">Inbox</option>
+                </select>
+              </div>
             </div>
           </div>
           <div class="header-actions">
             <button id="btn-new-task" class="btn-primary">+ Add Task</button>
           </div>
         </header>
-        <div id="task-list-items" class="task-items-container">
-          <!-- Tasks will be rendered here -->
-          <div class="list-empty">Loading tasks...</div>
+        <div class="tasks-kanban">
+          <div class="kanban-column" data-status="todo">
+            <header>To Do</header>
+            <div id="tasks-todo" class="column-items">
+              <div class="list-empty">No tasks</div>
+            </div>
+          </div>
+          <div class="kanban-column" data-status="in_progress">
+            <header>In Progress</header>
+            <div id="tasks-in-progress" class="column-items">
+              <div class="list-empty">No tasks</div>
+            </div>
+          </div>
+          <div class="kanban-column" data-status="done">
+            <header>Done</header>
+            <div id="tasks-done" class="column-items">
+              <div class="list-empty">No tasks</div>
+            </div>
+          </div>
         </div>
       </div>
 
@@ -140,12 +164,18 @@
           </div>
           <div class="form-group">
             <label for="detail-task-project">Project</label>
-            <input type="text" id="detail-task-project" placeholder="Project name" />
+            <select id="detail-task-project" title="Select Project">
+              <option value="inbox">Inbox</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="detail-task-recurrence">Recurrence</label>
+            <input type="text" id="detail-task-recurrence" placeholder="e.g. daily, weekly, every 2 days" aria-label="Task Recurrence Rule" />
           </div>
         </div>
         <footer class="panel-footer">
-          <button id="btn-delete-task" class="btn-danger">Delete</button>
-          <button id="btn-save-task" class="btn-primary">Save Changes</button>
+          <button id="btn-delete-task" class="btn-danger" aria-label="Delete Task">Delete</button>
+          <button id="btn-save-task" class="btn-primary" aria-label="Save Task Changes">Save Changes</button>
         </footer>
       </aside>
     </div>
@@ -154,9 +184,9 @@
     <div id="tab-settings" class="tab-view">Settings Tab</div>
   </main>
 
-  <aside id="right-sidebar">
-    <div class="sidebar-header">Thinking Partner</div>
-    <div id="ai-chat-messages">
+  <aside id="right-sidebar" aria-labelledby="sidebar-title">
+    <div id="sidebar-title" class="sidebar-header">Thinking Partner</div>
+    <div class="ai-chat-messages" aria-live="polite">
       <div class="ai-bubble">Write in your journal to begin.</div>
     </div>
     <div class="chat-input-area">

@@ -1,0 +1,147 @@
+/* ── AI CHAT BUBBLES ─────────────────────────── */
+.ai-chat-messages {
+    flex: 1;
+    overflow-y: auto;
+    padding: var(--space);
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.ai-bubble {
+    background: var(--color-bg);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: 12px;
+    font-size: 13px;
+    line-height: 1.5;
+    color: var(--color-text);
+    position: relative;
+    box-sizing: border-box;
+}
+
+.ai-bubble.processing {
+    border-color: var(--color-ai);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    color: var(--color-ai);
+}
+
+.ai-bubble.error {
+    border-color: var(--color-error);
+    background: rgba(224, 82, 82, 0.05);
+}
+
+/* ── ANALYSIS CARD ────────────────────────────── */
+.analysis-card {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.analysis-section h3 {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--color-muted);
+    margin-bottom: 8px;
+    font-weight: 700;
+}
+
+.analysis-section.summary .mood-badge {
+    display: inline-block;
+    background: var(--color-ai);
+    color: var(--color-bg);
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    margin-bottom: 8px;
+}
+
+.analysis-section.summary p {
+    font-size: 14px;
+    line-height: 1.6;
+}
+
+/* ── TAG CLOUD (Emotions) ─────────────────────── */
+.tag-cloud {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.tag {
+    font-size: 11px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    box-sizing: border-box;
+}
+
+.tag.emotion {
+    color: var(--color-ai);
+    border-color: rgba(41, 217, 194, 0.3);
+}
+
+/* ── TASK SUGGESTIONS ─────────────────────────── */
+.task-suggestions {
+    list-style: none;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.task-suggestions li {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: var(--radius);
+    font-size: 13px;
+    box-sizing: border-box;
+}
+
+.btn-task-add {
+    background: var(--color-ai);
+    color: var(--color-bg);
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    font-size: 11px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-sizing: border-box;
+}
+
+.btn-task-add:hover {
+    filter: brightness(1.1);
+}
+
+.btn-task-add.added {
+    background: var(--color-success);
+    color: white;
+    cursor: default;
+}
+
+/* ── SPINNER ──────────────────────────────────── */
+.spinner {
+    width: 20px;
+    height: 20px;
+    border: 3px solid rgba(41, 217, 194, 0.2);
+    border-top-color: var(--color-ai);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+    box-sizing: border-box;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
