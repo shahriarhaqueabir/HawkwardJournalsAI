@@ -51,7 +51,7 @@
 
 .tasks-kanban {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 16px;
   padding: var(--space);
   height: calc(100% - 70px); /* Adjust for header height */
@@ -67,6 +67,7 @@
   flex-direction: column;
   height: 100%;
   min-width: 0;
+  box-sizing: border-box;
 }
 
 .kanban-column header {
@@ -238,4 +239,71 @@
   font-size: 24px;
   cursor: pointer;
   color: var(--color-muted);
+}
+
+/* ── ATTACHMENT LIST ────────────────────────── */
+.attachment-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-height: 24px;
+}
+
+.attachment-empty {
+  font-size: 12px;
+  color: var(--color-muted);
+  font-style: italic;
+}
+
+.attachment-chip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 6px 10px;
+  background: var(--color-bg);
+  border: 1px solid var(--color-border);
+  border-radius: calc(var(--radius) / 2);
+  font-size: 12px;
+  color: var(--color-text);
+}
+
+.attachment-chip.missing {
+  border-color: #ff4d4d40;
+  color: var(--color-muted);
+}
+
+.attachment-chip-name {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attachment-chip-size {
+  color: var(--color-muted);
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.attachment-chip-del {
+  background: transparent;
+  border: none;
+  color: var(--color-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+  flex-shrink: 0;
+  transition: color 0.15s;
+}
+
+.attachment-chip-del:hover {
+  color: #ff4d4d;
+}
+
+.btn-sm {
+  padding: 6px 10px;
+  font-size: 12px;
+  border-radius: calc(var(--radius) / 2);
 }

@@ -12,13 +12,13 @@ HawkwardJournalAI is a private, offline-first Windows desktop productivity app b
 
 ## Current Build Status
 
-**Phase:** Phase 1 (Core Journal & AI Integration) in progress.
-**Last built:** AI Analysis Pipeline Hardened (background worker loop, deduplication, retry logic).
+**Phase:** Phase 2 (Tasks) complete. Moving into Phase 3 (AI Chat & Tool Engine) and Phase 4 (Reports).
+**Last built:** Task Management CRUD, First-Class Project Entities, Reactive Event Model (D-96 AppEvent unification), Background Scheduler Suite (reminders & recurrence).
 **Open issues:**
-- Refactor raw string events to Typed `AppEvent` enum (D-96 compliance).
-- Implement VirtualList + Keyset Cursor for Journal (D-45, D-104).
-- Phase 2 (Task Management) handlers still placeholders.
-**Spec files:** `AgentDocs/PersonalLifeOS_MASTER_SPEC_v1.6.md` + `AgentDocs/PersonalLifeOS_SPEC_ADDENDUM_v1.7.md`
+- Implement Phase 3 AI tools execution (create_task, search_journal, etc.) with timeout cancellation (D-95).
+- Build the 6 Analytical Reports (Phase 4).
+- Address D-13 spec violation (Projects recently implemented as first-class entity rather than a text field).
+**Spec files:** `AgentDocs/HawkwardJournalAI_MASTER_SPEC_v1.6.md` + `AgentDocs/HawkwardJournalAI_SPEC_ADDENDUM_v1.7.md`
 **Locked decisions:** D-01 through D-111 (111 total)
 
 ---
@@ -140,6 +140,7 @@ hawkwardjournalai/
 **Frontend:**
 
 - All `invoke()` calls go through `ipc.js` wrapper — always has `.catch()` → `showError()` toast
+- **IPC naming rule:** `invoke()` top-level arg keys must be **camelCase** (Tauri v2 requirement). Nested struct fields in JSON payloads follow **snake_case** (Rust serde convention). Single-word params are unaffected.
 - All Rust→Frontend events arrive on the single `"app_event"` listener in `app.js`
 - Dispatch by `event.payload.type` — never by event name string
 - Tab views are loaded once and toggled via CSS `display` — never re-rendered on tab switch
@@ -245,12 +246,12 @@ Before closing the session:
 - [ ] State the logical next step
 
 Prompts for specific use cases:
-P-01_research_review_prompts
-P-02_getting_unstuck_prompts
-P-03_self_evaluation_prompts
-P-04_debugging_errors_prompts
-P-05_accuracy_checking_prompts
+e:\Abir\LocalCodeRepo\HawkwardJournalAI\AgentDocs\P-01_research_review_response_process.md
+e:\Abir\LocalCodeRepo\HawkwardJournalAI\AgentDocs\P-02_getting_unstuck_prompts.md
+e:\Abir\LocalCodeRepo\HawkwardJournalAI\AgentDocs\P-03_self_evaluation_prompts.md
+e:\Abir\LocalCodeRepo\HawkwardJournalAI\AgentDocs\P-04_debugging_prompts.md
+e:\Abir\LocalCodeRepo\HawkwardJournalAI\AgentDocs\P-05_accuracy_checking_prompts.md
 
 project plan:
-HawkwardJournalAI_MASTER_SPEC_v1.6
-HawkwardJournalAI_SPEC_ADDENDUM_v1.7
+e:\Abir\LocalCodeRepo\HawkwardJournalAI\AgentDocs\HawkwardJournalAI_MASTER_SPEC_v1.6.md
+e:\Abir\LocalCodeRepo\HawkwardJournalAI\AgentDocs\HawkwardJournalAI_SPEC_ADDENDUM_v1.7.md

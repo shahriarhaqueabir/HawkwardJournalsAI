@@ -31,7 +31,7 @@ pub fn has_review_run_this_week(conn: &Connection) -> bool {
 }
 
 /// Core function to generate the weekly report and update the last run date.
-pub async fn maybe_run_weekly_review(app: &AppHandle, conn: &Connection) -> Result<(), AppError> {
+pub fn maybe_run_weekly_review(app: &AppHandle, conn: &Connection) -> Result<(), AppError> {
     let today = Local::now().date_naive();
     
     // Decision D-109: Only run on Mondays

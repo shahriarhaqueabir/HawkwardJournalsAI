@@ -3,7 +3,7 @@ use rusqlite::Connection;
 use tauri::AppHandle;
 use crate::error::AppError;
 
-pub async fn poll_reminders(app: &AppHandle, conn: &Connection) -> Result<(), AppError> {
+pub fn poll_reminders(app: &AppHandle, conn: &Connection) -> Result<(), AppError> {
     let now = Local::now().to_rfc3339();
     
     // Find tasks that have a reminder in the past, haven't fired,

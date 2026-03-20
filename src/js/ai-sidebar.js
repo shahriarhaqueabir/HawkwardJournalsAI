@@ -1,17 +1,15 @@
 import { invoke } from "./ipc.js";
 
 export function initAiSidebar() {
-  const messagesEl = document.querySelector(".ai-chat-messages");
+  const messagesEl = document.querySelector(".right-sidebar .ai-chat-messages");
   const currentEntryId = document.getElementById("current-entry-id");
 
   if (!messagesEl) return;
 
-  // SINGLE typed event listener (D-96)
-  globalThis.__TAURI__.event.listen("app_event", (event) => {
-    const payload = event.payload;
+  // Single typed event handler (Called by app.js dispatcher)
+  globalThis.__AI_SIDEBAR_HANDLER__ = (payload) => {
     const { type } = payload;
 
-    // Dispatch based on type
     switch (type) {
       case "journal_analysis_processing":
         if (currentEntryId.value === payload.entry_id) {
@@ -39,7 +37,7 @@ export function initAiSidebar() {
         `);
         break;
     }
-  });
+  };
 
   function showProcessingStatus() {
     messagesEl.innerHTML = `
@@ -109,24 +107,38 @@ export function initAiSidebar() {
       `;
     }
 
-    html += `</div>`;
+    html += `
+        <div class="analysis-footer">
+          <button id="btn-ai-followup" class="btn-primary btn-sm" style="margin-top: 20px; width: 100%;">Ask AI about this entry...</button>
+        </div>
+      </div>
+    `;
     messagesEl.innerHTML = html;
 
-    // Task listeners (Phase 2 wiring)
+    // Follow-up listener
+    const btnFollowup = messagesEl.querySelector("#btn-ai-followup");
+    if (btnFollowup) {
+      btnFollowup.addEventListener("click", () => {
+        if (globalThis.jumpToAiChat) {
+          globalThis.jumpToAiChat(currentEntryId.value);
+        }
+      });
+    }
+
+    // Task listeners
     messagesEl.querySelectorAll(".btn-task-add").forEach(btn => {
       btn.addEventListener("click", async () => {
         const title = btn.dataset.task;
-        const project_id = btn.dataset.project || "inbox";
+        const projectId = btn.dataset.project || "inbox";
         try {
           btn.disabled = true;
           btn.textContent = "...";
-          await invoke("task_create", { title, project_id });
+          await invoke("task_create", { title, projectId });
           btn.textContent = "✓ Added";
           btn.classList.add("added");
         } catch (err) {
           btn.textContent = "Error";
           btn.disabled = false;
-          throw err; // Rethrow so ipc.js/global handler can also see it if needed
         }
       });
     });

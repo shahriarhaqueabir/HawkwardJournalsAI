@@ -1,5 +1,6 @@
 import { initJournal } from "./tabs/journal.js";
 import { initTasks } from "./tabs/tasks.js";
+import { initAiChat } from "./tabs/ai.js";
 import { initAiSidebar } from "./ai-sidebar.js";
 import { invoke } from "./ipc.js";
 
@@ -51,10 +52,22 @@ globalThis.__TAURI__.event.listen("app_event", (event) => {
     globalThis.__JOURNAL_EVENT_HANDLER__(payload);
   }
 
-  // 2. Global handlers (Toasts, System Status)
-  if (payload.type === "system_status") {
-    console.info(`[System] ${payload.message}`);
+  // 2. Pass to AI Tab if mounted
+  if (globalThis.__AI_CHAT_HANDLER__) {
+    globalThis.__AI_CHAT_HANDLER__(payload);
   }
+
+  // 3. Pass to AI Sidebar if mounted
+  if (globalThis.__AI_SIDEBAR_HANDLER__) {
+    globalThis.__AI_SIDEBAR_HANDLER__(payload);
+  }
+
+  // 4. Pass to Tasks Tab if mounted
+  if (globalThis.__TASKS_EVENT_HANDLER__) {
+    globalThis.__TASKS_EVENT_HANDLER__(payload);
+  }
+
+  // 4. Global handlers (Toasts, System Status)
   if (payload.type === "database_error") {
     console.error(`[DB Error] ${payload.operation}: ${payload.error}`);
   }
@@ -63,6 +76,7 @@ globalThis.__TAURI__.event.listen("app_event", (event) => {
 // Initializations
 initJournal();
 initTasks();
+initAiChat();
 initAiSidebar();
 checkOllama();
 setInterval(checkOllama, 30000);

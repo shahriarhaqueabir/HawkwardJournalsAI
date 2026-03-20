@@ -1,10 +1,12 @@
 import { invoke } from "../ipc.js";
 
+
 export function initTasks() {
   const columns = {
     todo: document.getElementById("tasks-todo"),
     in_progress: document.getElementById("tasks-in-progress"),
-    done: document.getElementById("tasks-done")
+    done: document.getElementById("tasks-done"),
+    cancelled: document.getElementById("tasks-cancelled")
   };
   const searchInput = document.getElementById("task-search");
   const newTaskBtn = document.getElementById("btn-new-task");
@@ -25,20 +27,75 @@ export function initTasks() {
   const detailEnergy = document.getElementById("detail-task-energy");
   const detailProject = document.getElementById("detail-task-project");
   const detailRecurrence = document.getElementById("detail-task-recurrence");
+  const detailContext = document.getElementById("detail-task-context");
+  const detailEstimate = document.getElementById("detail-task-estimate");
+  const detailUrl = document.getElementById("detail-task-url");
+  const detailNotes = document.getElementById("detail-task-notes");
+  const attachmentList  = document.getElementById("detail-task-attachments");
+  const addAttachBtn    = document.getElementById("btn-add-attachment");
+  const showProjectModalBtn = document.getElementById("btn-show-new-project");
+  const projectCreateModal = document.getElementById("modal-project");
+  const saveProjectBtn = document.getElementById("btn-create-project-save");
+  const newProjectName = document.getElementById("new-project-name");
+  const newProjectDesc = document.getElementById("new-project-desc");
 
   if (!columns.todo) return;
+
+  let currentTask = null;
+
+  // Modals
+  showProjectModalBtn?.addEventListener("click", () => {
+    newProjectName.value = "";
+    newProjectDesc.value = "";
+    projectCreateModal.classList.remove("hidden");
+  });
+
+  document.querySelectorAll("[data-modal-close]").forEach(btn => {
+    btn.addEventListener("click", () => {
+      btn.closest(".modal-overlay").classList.add("hidden");
+    });
+  });
+
+  saveProjectBtn?.addEventListener("click", async () => {
+    const name = newProjectName.value.trim();
+    if (!name) return;
+
+    try {
+      const now = new Date().toISOString();
+      const project = {
+        id: "p_" + Math.random().toString(36).slice(2, 11),
+        name,
+        description: newProjectDesc.value.trim() || null,
+        status: "active",
+        color: "#6c8ef7",
+        created_at: now,
+        updated_at: now
+      };
+      await invoke("project_create", { project });
+      projectCreateModal.classList.add("hidden");
+      await loadProjects();
+    } catch (err) {
+      console.error("Failed to create project:", err);
+    }
+  });
 
   // --- REFRESH / LIST ---
   async function refreshTasks(query = "") {
     try {
-      let tasks = query.trim() 
-        ? await invoke("task_search", { query })
-        : await invoke("task_list");
-
-      // Client-side project filter (could be backend later)
       const filter = projectFilter.value;
-      if (filter !== "all") {
-        tasks = tasks.filter(t => t.project_id === filter);
+      let tasks;
+      
+      if (query.trim()) {
+        tasks = await invoke("task_search", { query });
+        if (filter !== "all") {
+          tasks = tasks.filter(t => t.project_id === filter);
+        }
+      } else {
+        const payload = { filters: { exclude_statuses: [] } };
+        if (filter !== "all") {
+          payload.filters.project_id = filter;
+        }
+        tasks = await invoke("task_list", payload);
       }
 
       renderTasks(tasks);
@@ -50,15 +107,67 @@ export function initTasks() {
   async function loadProjects() {
     try {
       const projects = await invoke("project_list");
-      const filterHtml = '<option value="all">All Projects</option>' + 
+      const inboxOpt = '<option value="inbox">Inbox</option>';
+      const filterHtml = '<option value="all">All Projects</option>' + inboxOpt +
         projects.map(p => `<option value="${p.id}">${p.name}</option>`).join("");
-      const selectHtml = projects.map(p => `<option value="${p.id}">${p.name}</option>`).join("");
-      
+      const selectHtml = inboxOpt +
+        projects.map(p => `<option value="${p.id}">${p.name}</option>`).join("");
+
       projectFilter.innerHTML = filterHtml;
       detailProject.innerHTML = selectHtml;
     } catch (err) {
       console.error("Failed to load projects:", err);
     }
+  }
+
+  // --- ATTACHMENTS ---
+  async function loadAttachments(taskId) {
+    try {
+      const attachments = await invoke("attachment_list", { taskId: taskId });
+      renderAttachments(attachments, taskId);
+    } catch (err) {
+      console.error("Failed to load attachments:", err);
+      attachmentList.innerHTML = '<div class="attachment-empty">Failed to load</div>';
+    }
+  }
+
+  function renderAttachments(attachments, taskId) {
+    if (!attachments || attachments.length === 0) {
+      attachmentList.innerHTML = '<div class="attachment-empty">No attachments</div>';
+      return;
+    }
+
+    attachmentList.innerHTML = attachments.map(att => {
+      let sizeLabel = "";
+      if (att.size_bytes) {
+        sizeLabel = att.size_bytes < 1024 * 1024
+          ? `${(att.size_bytes / 1024).toFixed(1)} KB`
+          : `${(att.size_bytes / (1024 * 1024)).toFixed(1)} MB`;
+      }
+      const missingClass = att.file_missing ? " missing" : "";
+      const missingBadge = att.file_missing ? " ⚠️" : "";
+      return `
+        <div class="attachment-chip${missingClass}" data-att-id="${att.id}">
+          <span class="attachment-chip-name" title="${att.file_name}">${att.file_name}${missingBadge}</span>
+          ${sizeLabel ? `<span class="attachment-chip-size">${sizeLabel}</span>` : ""}
+          <button class="attachment-chip-del" data-att-id="${att.id}" data-task-id="${taskId}" title="Remove attachment" aria-label="Remove attachment">×</button>
+        </div>`;
+    }).join("");
+
+    // Wire delete buttons
+    attachmentList.querySelectorAll(".attachment-chip-del").forEach(btn => {
+      btn.addEventListener("click", async (e) => {
+        e.stopPropagation();
+        const attId  = btn.dataset.attId;
+        const tskId  = btn.dataset.taskId;
+        try {
+          await invoke("attachment_remove", { id: attId, taskId: tskId });
+          await loadAttachments(tskId);
+        } catch (err) {
+          console.error("Failed to remove attachment:", err);
+        }
+      });
+    });
   }
 
   function renderTasks(tasks) {
@@ -156,6 +265,7 @@ export function initTasks() {
     try {
       const task = await invoke("task_get", { id });
       if (!task) return;
+      currentTask = task;
 
       detailId.value = task.id;
       detailTitle.value = task.title;
@@ -165,10 +275,14 @@ export function initTasks() {
       detailDate.value = task.due_date || "";
       detailEnergy.value = task.energy_level || "";
       detailProject.value = task.project_id || "inbox";
-
       detailRecurrence.value = task.recurrence || "";
+      detailContext.value = task.context_tag || "";
+      detailEstimate.value = task.time_estimate || "";
+      detailUrl.value = task.linked_url || "";
+      detailNotes.value = task.notes || "";
 
       detailPanel.classList.remove("hidden");
+      await loadAttachments(task.id);
     } catch (err) {
       console.error("Failed to get task details:", err);
     }
@@ -198,34 +312,26 @@ export function initTasks() {
   });
 
   saveTaskBtn.addEventListener("click", async () => {
-    const task = {
-      id: detailId.value,
+    if (!currentTask) return;
+
+    const updatedTask = {
+      ...currentTask,
       title: detailTitle.value,
       description: detailDesc.value || null,
       priority: detailPriority.value,
       status: detailStatus.value,
       due_date: detailDate.value || null,
-      due_time: null,
-      reminder_at: null,
-      time_estimate: null,
-      time_logged: 0,
-      tags: "[]",
-      labels: "[]",
-      category: null,
-      project: detailProject.value || null,
+      project_id: detailProject.value || "inbox",
       recurrence: detailRecurrence.value || null,
-      next_occurrence: null,
       energy_level: detailEnergy.value || null,
-      context_tag: null,
-      linked_url: null,
-      ai_created: false,
-      created_at: "", 
-      updated_at: "",
-      completed_at: null
+      context_tag: detailContext.value || null,
+      time_estimate: detailEstimate.value ? Number.parseInt(detailEstimate.value, 10) : null,
+      linked_url: detailUrl.value || null,
+      notes: detailNotes.value || null,
     };
 
     try {
-      await invoke("task_update", { task });
+      await invoke("task_update", { task: updatedTask });
       closeDetail();
       refreshTasks(searchInput.value);
     } catch (err) {
@@ -246,6 +352,35 @@ export function initTasks() {
 
   closeDetailBtn.addEventListener("click", closeDetail);
 
+  // --- ADD ATTACHMENT ---
+  addAttachBtn.addEventListener("click", async () => {
+    if (!currentTask) return;
+    try {
+      // Tauri v2 dialog plugin is injected on globalThis.__TAURI__.dialog
+      const dialog = globalThis.__TAURI__?.dialog;
+      if (!dialog) { console.error("Tauri dialog plugin not available"); return; }
+      const selected = await dialog.open({
+        multiple: false,
+        title: "Select Attachment"
+      });
+      if (!selected) return; // user cancelled
+      const sourcePath = typeof selected === "string" ? selected : selected.path;
+      await invoke("attachment_add", { taskId: currentTask.id, sourcePath: sourcePath });
+      await loadAttachments(currentTask.id);
+    } catch (err) {
+      console.error("Failed to add attachment:", err);
+    }
+  });
+
   // Initial load
   loadProjects().then(() => refreshTasks());
+
+  globalThis.__TASKS_EVENT_HANDLER__ = (payload) => {
+    if (["task_created", "task_updated", "task_deleted", "task_completed", "task_restored"].includes(payload.type)) {
+      refreshTasks(searchInput.value);
+      if (currentTask && (payload.id === currentTask.id || payload.task_id === currentTask.id)) {
+        openDetail(currentTask.id);
+      }
+    }
+  };
 }

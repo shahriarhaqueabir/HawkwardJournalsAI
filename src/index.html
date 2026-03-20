@@ -81,6 +81,7 @@
                   <option value="all">All Projects</option>
                   <option value="inbox">Inbox</option>
                 </select>
+                <button id="btn-show-new-project" class="btn-ghost btn-sm" title="Create New Project">＋</button>
               </div>
             </div>
           </div>
@@ -104,6 +105,12 @@
           <div class="kanban-column" data-status="done">
             <header>Done</header>
             <div id="tasks-done" class="column-items">
+              <div class="list-empty">No tasks</div>
+            </div>
+          </div>
+          <div class="kanban-column" data-status="cancelled">
+            <header>Cancelled</header>
+            <div id="tasks-cancelled" class="column-items">
               <div class="list-empty">No tasks</div>
             </div>
           </div>
@@ -168,18 +175,77 @@
               <option value="inbox">Inbox</option>
             </select>
           </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label for="detail-task-context">Context</label>
+              <select id="detail-task-context" title="Context Tag">
+                <option value="">None</option>
+                <option value="computer">Computer</option>
+                <option value="phone">Phone</option>
+                <option value="errands">Errands</option>
+                <option value="home">Home</option>
+                <option value="anywhere">Anywhere</option>
+              </select>
+            </div>
+            <div class="form-group">
+              <label for="detail-task-estimate">Estimate (min)</label>
+              <input type="number" id="detail-task-estimate" placeholder="60" title="Time Estimate" />
+            </div>
+          </div>
+          <div class="form-group">
+            <label for="detail-task-url">Linked URL</label>
+            <input type="url" id="detail-task-url" placeholder="https://..." aria-label="Linked URL" />
+          </div>
           <div class="form-group">
             <label for="detail-task-recurrence">Recurrence</label>
             <input type="text" id="detail-task-recurrence" placeholder="e.g. daily, weekly, every 2 days" aria-label="Task Recurrence Rule" />
           </div>
+          <div class="form-group">
+            <label for="detail-task-notes">Notes</label>
+            <textarea id="detail-task-notes" placeholder="Extra private notes..."></textarea>
+          </div>
+          <div class="form-group">
+            <span id="attachments-label" class="form-label">Attachments</span>
+            <div id="detail-task-attachments" class="attachment-list" aria-labelledby="attachments-label">
+              <div class="attachment-empty">No attachments</div>
+            </div>
+            <button id="btn-add-attachment" class="btn-ghost btn-sm" type="button">
+              📎 Add File
+            </button>
+          </div>
         </div>
         <footer class="panel-footer">
-          <button id="btn-delete-task" class="btn-danger" aria-label="Delete Task">Delete</button>
-          <button id="btn-save-task" class="btn-primary" aria-label="Save Task Changes">Save Changes</button>
+          <button id="btn-delete-task" class="btn-danger">Delete</button>
+          <button id="btn-save-task" class="btn-primary">Save Changes</button>
         </footer>
       </aside>
     </div>
-    <div id="tab-ai" class="tab-view">AI Tab</div>
+    <div id="tab-ai" class="tab-view">
+      <div class="ai-tab-layout">
+        <aside class="ai-history-sidebar" aria-label="Conversation History">
+          <header>
+            <h3>Conversations</h3>
+            <button id="btn-new-chat" class="btn-ghost btn-sm" title="Start New Chat">＋</button>
+          </header>
+          <div id="ai-conversation-list" class="conversation-list">
+            <!-- Loaded via ai.js -->
+            <div class="list-empty">No conversations</div>
+          </div>
+        </aside>
+        <div class="ai-chat-container">
+          <div id="ai-tab-messages" class="ai-chat-messages">
+            <div class="ai-welcome">
+              <h2>AI Thinking Partner</h2>
+              <p>Ask anything about your journal, tasks, or plans.</p>
+            </div>
+          </div>
+          <div class="chat-input-area">
+            <textarea id="ai-tab-input" placeholder="Message your partner..."></textarea>
+            <button id="btn-ai-send" class="btn-primary" title="Send Message">Send</button>
+          </div>
+        </div>
+      </div>
+    </div>
     <div id="tab-reports" class="tab-view">Reports Tab</div>
     <div id="tab-settings" class="tab-view">Settings Tab</div>
   </main>
@@ -195,5 +261,29 @@
   </aside>
 
   <script type="module" src="js/app.js"></script>
+
+  <!-- Modals -->
+  <div id="modal-project" class="modal-overlay hidden">
+    <div class="modal-content">
+      <header class="modal-header">
+        <h3>New Project</h3>
+        <button class="btn-icon" data-modal-close>×</button>
+      </header>
+      <div class="modal-body">
+        <div class="form-group">
+          <label for="new-project-name">Project Name</label>
+          <input type="text" id="new-project-name" placeholder="e.g. Personal Growth" />
+        </div>
+        <div class="form-group">
+          <label for="new-project-desc">Description (Optional)</label>
+          <textarea id="new-project-desc" rows="2" placeholder="What is this project about?"></textarea>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-ghost" data-modal-close>Cancel</button>
+        <button id="btn-create-project-save" class="btn-primary">Create Project</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

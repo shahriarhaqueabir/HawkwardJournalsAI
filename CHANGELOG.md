@@ -1,5 +1,28 @@
 # Changelog
 
+## 2026-03-20
+
+### Phase 3 AI Chat & Tool Engine Hardening
+
+- **AI Stream Logic Fixes**: 
+  - Refactored `ai_chat` in `lib.rs` to use typed `OllamaToolCall` structs instead of dynamic JSON access, ensuring type safety and compatibility with updated Ollama API responses.
+  - Modified history loading to clear `tool_calls` from past messages, preventing unintended tool re-triggering during context injection (D-94).
+  - Fixed syntax corruption in `lib.rs` assistant token stream and nested block logic.
+- **Tool Engine Enhancements**:
+  - Updated `execute_tool_call` in `tools.rs` to return a unique `call_id` for every tool invocation.
+  - Implemented automatic UI feedback for read-only tools (search, list) by creating "Silent Action" cards in the AI chat tab (`src/js/tabs/ai.js`).
+  - Hardened fallback tool parser in `fallback.rs` with empty name guards and known-tool filters to prevent false positives from conversational text.
+- **API & Schema Alignment**:
+  - Resolved `E0063` compilation errors by adding missing fields to `JournalEntry` (`emotions`, `tags`, `last_analysed_at`) and `Task` (`recurrence`, `next_occurrence`) initializers in `lib.rs`.
+  - Standardized JSON macro usage in `lib.rs` with `use serde_json::json`.
+- **System Prompt Refinement**: Updated thinking partner rules in `prompt.rs` to enforce strict plain-text-first conversational behavior and restricted tool usage.
+
+### Project Review & Documentation Handover
+
+- **Agent Alignment Review**: Evaluated current branch state against `PersonalLifeOS_MASTER_SPEC_v1.6` and `ADDENDUM_v1.7`.
+- **Created Handover Document**: Recorded current milestones, target features, and spec deviations into `AgentDocs/HandoverState.md`.
+- **Status Update**: Updated `AGENTS.md` to reflect Phase 2 conclusion and pivot into Phase 3/4. Noted the active architectural deviation pertaining to Project objects (D-13).
+
 ## 2026-03-19
 
 ### Task Management & AI Integration
@@ -23,6 +46,7 @@
 - **Recurrence Idempotency**: Added completion guards to prevent duplicate task generation on status retries (`src-tauri/src/lib.rs`).
 
 ### Project Alignment & Recovery Loop (Phase 2)
+
 - **Backend API Standardization**: 
   - `task_create` now correctly returns the complete Task object instead of ID string (Spec §8A).
   - Enforced 2-level maximum subtask depth constraint natively in the Rust command handler (D-40).
@@ -39,6 +63,7 @@
 ## 2026-03-18
 
 ### AI Analysis Pipeline Hardening
+
 - **Event-Queue-Worker Architecture**: Implemented background analysis worker to decouple UI from AI latency (`src-tauri/src/lib.rs`).
 - **Memory Safety**:
   - Fixed "Double Move" AppHandle errors by using `handle.clone()` for separate async scopes.
@@ -53,12 +78,14 @@
 - **Frontend Sync**: Updated `ai-sidebar.js` and `journal.js` to handle standardized object-based payloads and show processing states.
 
 ### GitHub & Security Preparation
+
 - **Secure .gitignore**: Blocked all user data (`/data`, `/backups`, `/attachments`, `/exports`) and SQLite temporary files while allowing critical `Cargo.lock` files.
 - **Scaffolding**: Added `.gitkeep` to all local data directories to maintain structure in the repo.
 - **Documentation**: Overhauled `README.md` with professional project overviews, setup guides, and privacy highlights.
 - **Prompt Engineering**: Refined `src-tauri/src/ai/prompt.rs` to include the `mood` field and restrict output to JSON only.
 
 ## 2026-03-16
+
 - Initialized project scaffold per spec.
 - Added directories: src-tauri, src-tauri/src, src-tauri/src/db, src-tauri/src/ai, src-tauri/src/backup, src-tauri/src/scheduler, src-tauri/migrations, src, src/styles, src/styles/themes, src/js, src/js/tabs, src/views, src/assets, src/assets/libs, data, backups, attachments, exports.
 - Added files: AGENTS.md, README.md, src-tauri/Cargo.toml, src-tauri/tauri.conf.json, src-tauri/src/main.rs, src-tauri/src/lib.rs, src-tauri/src/error.rs, src-tauri/src/events.rs, src-tauri/src/logger.rs.
@@ -83,3 +110,4 @@
 - App shell: route all invokes through wrapper + prevent tab-switch crash, added missing tab placeholders (`src/js/app.js`, `src/index.html`).
 - DB journal writes: persist `word_count` and normalize empty titles (`src-tauri/src/db/journal.rs`, `src-tauri/src/lib.rs`).
 - App name is official updated to HawkwardJournal. DB name is hawkward.db
+

@@ -1,0 +1,29 @@
+    Checking hawkward-journal-ai v0.1.0 (E:\Abir\LocalCodeRepo\HawkwardJournalAI\src-tauri)
+error: mismatched closing delimiter: `}`
+   --> src\ai\client.rs:167:49
+    |
+ 50 | impl OllamaClient {
+    |                   - closing delimiter possibly meant for this
+...
+167 |         let stream = response.bytes_stream().map(|item| {
+    |                                                 ^ unclosed delimiter
+...
+194 | }
+    | ^ mismatched closing delimiter
+
+error: this file contains an unclosed delimiter
+   --> src\ai\client.rs:204:3
+    |
+ 50 | impl OllamaClient {
+    |                   - unclosed delimiter
+...
+167 |         let stream = response.bytes_stream().map(|item| {
+    |                                                         - this delimiter might not be properly closed...
+...
+193 |     }
+    |     - ...as it matches this but it has different indentation
+...
+204 | }
+    |  ^
+
+error: could not compile `hawkward-journal-ai` (lib) due to 2 previous errors

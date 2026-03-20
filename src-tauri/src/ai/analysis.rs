@@ -25,6 +25,12 @@ impl AnalysisState {
 
     pub async fn should_analyze(&self, entry_id: &str, content: &str) -> bool {
         let mut hashes = self.last_hashes.lock().await;
+        
+        // Prevent memory leak by capping the hash map size
+        if hashes.len() > 1000 {
+            hashes.clear();
+        }
+
         let mut hasher = std::collections::hash_map::DefaultHasher::new();
         std::hash::Hash::hash(&content, &mut hasher);
         let current_hash = std::hash::Hasher::finish(&hasher);

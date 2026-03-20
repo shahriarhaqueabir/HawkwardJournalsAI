@@ -75,7 +75,7 @@ fn parse_complex_recurrence(current_due: NaiveDate, r: &str) -> Result<NaiveDate
 
 /// Interval-based recurrence worker (D-120).
 /// Scans on an interval schedule to trigger rolling-chain recurrences.
-pub async fn poll_recurrences(app: &AppHandle, conn: &Connection) -> Result<(), AppError> {
+pub fn poll_recurrences(app: &AppHandle, conn: &Connection) -> Result<(), AppError> {
     let today = Local::now().date_naive();
     let today_str = today.to_string();
     let now = Local::now().to_rfc3339();

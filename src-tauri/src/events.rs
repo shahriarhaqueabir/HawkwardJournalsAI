@@ -35,6 +35,30 @@ pub enum AppEvent {
     WeeklyReviewGenerated { date: String },
 
     // AI & System
+    // -- AI Chat Events
+    AiToken {
+        token: String,
+        done: bool,
+        source: crate::events::AiTokenSource,
+    },
+    AiToolPending {
+        call_id: String,
+        name: String,
+        args: serde_json::Value,
+        description: String,
+    },
+    AiToolResult {
+        call_id: String,
+        name: String,
+        result: serde_json::Value,
+        confirmed: bool,
+    },
+    AiConfirmTimeout {
+        call_id: String,
+        tool_name: String,
+    },
+    AiStatus(String),
+    // --
     AiModelMissing { model: String },
     SystemStatus { message: String },
     DatabaseError {
@@ -42,6 +66,15 @@ pub enum AppEvent {
         error: String,
     },
 }
+
+#[allow(dead_code)]
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum AiTokenSource {
+    Chat,
+    Analysis,
+}
+
 
 pub fn emit(app: &AppHandle, event: AppEvent) {
     app.emit("app_event", event).ok();

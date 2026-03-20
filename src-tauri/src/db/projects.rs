@@ -1,5 +1,4 @@
 use crate::error::AppError;
-use chrono::Utc;
 use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
