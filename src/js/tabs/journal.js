@@ -27,6 +27,8 @@ export function initJournal() {
   let isSaving = false;
   let pendingSave = false;
   let lastSaved = { id: "", title: "", content: "" };
+  let reflectionTimer = null;
+  let blankEntryNudgeTimer = null;
 
   // ── REFRESH LIST ────────────────────────────────
   let searchDebounce = null;
@@ -155,6 +157,7 @@ export function initJournal() {
 
   // ── LOAD ENTRY ──────────────────────────────────
   async function loadEntry(id) {
+    clearCompanionTimers();
     if (isSaving) {
       // Small delay if we are mid-save to avoid race conditions
       setTimeout(() => loadEntry(id), 200);
@@ -183,6 +186,7 @@ export function initJournal() {
   // ── NEW ENTRY ───────────────────────────────────
   function createNewEntry() {
     if (isSaving) return;
+    clearCompanionTimers();
     idInput.value = "";
     titleInput.value = "";
     editor.value = "";
@@ -191,6 +195,7 @@ export function initJournal() {
     statusEl.textContent = "Ready";
     listEl.querySelectorAll(".entry-item").forEach(i => i.classList.remove("active"));
     editor.focus();
+    scheduleCompanionForBlankEntry();
   }
 
   // ── DELETE ENTRY ─────────────────────────────────
@@ -280,6 +285,29 @@ export function initJournal() {
     wordCountEl.textContent = `${count} words`;
   }
 
+  function clearCompanionTimers() {
+    clearTimeout(reflectionTimer);
+    clearTimeout(blankEntryNudgeTimer);
+    reflectionTimer = null;
+    blankEntryNudgeTimer = null;
+  }
+
+  function scheduleCompanionForBlankEntry() {
+    clearCompanionTimers();
+
+    reflectionTimer = setTimeout(() => {
+      const isBlank = !(editor.value || "").trim() && !(titleInput.value || "").trim() && !idInput.value;
+      if (!isBlank) return;
+      globalThis.requestSidebarReflectionPrompt?.({ tryAnother: false });
+    }, 1200);
+
+    blankEntryNudgeTimer = setTimeout(() => {
+      const isBlank = !(editor.value || "").trim() && !(titleInput.value || "").trim() && !idInput.value;
+      if (!isBlank) return;
+      globalThis.requestSidebarProactiveNudge?.("empty_entry");
+    }, 30000);
+  }
+
   const triggerAutoSave = () => {
     statusEl.textContent = "Typing...";
     updateWordCount();
@@ -335,6 +363,22 @@ export function initJournal() {
   // ── INIT ────────────────────────────────────────
   editor.addEventListener("input", triggerAutoSave);
   titleInput.addEventListener("input", triggerAutoSave);
+  editor.addEventListener("input", () => {
+    const isBlank = !(editor.value || "").trim() && !(titleInput.value || "").trim() && !idInput.value;
+    if (isBlank) {
+      scheduleCompanionForBlankEntry();
+    } else {
+      clearCompanionTimers();
+    }
+  });
+  titleInput.addEventListener("input", () => {
+    const isBlank = !(editor.value || "").trim() && !(titleInput.value || "").trim() && !idInput.value;
+    if (isBlank) {
+      scheduleCompanionForBlankEntry();
+    } else {
+      clearCompanionTimers();
+    }
+  });
   btnNew?.addEventListener("click", createNewEntry);
   btnDelete?.addEventListener("click", deleteEntry);
   btnAnalyze?.addEventListener("click", requestAnalysis);
@@ -344,4 +388,7 @@ export function initJournal() {
   });
 
   refreshList();
+  if (!idInput.value && !editor.value.trim() && !titleInput.value.trim()) {
+    scheduleCompanionForBlankEntry();
+  }
 }

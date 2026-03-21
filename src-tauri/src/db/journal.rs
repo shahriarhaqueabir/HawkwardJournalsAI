@@ -1,6 +1,6 @@
 use crate::error::AppError;
 use chrono::Utc;
-use rusqlite::{params, named_params, Connection};
+use rusqlite::{named_params, params, Connection};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -182,6 +182,63 @@ pub fn list_entries(
     Ok(result)
 }
 
+pub fn list_recent_entries(
+    conn: &Connection,
+    limit: u32,
+    exclude_id: Option<&str>,
+) -> Result<Vec<JournalEntry>, AppError> {
+    let mut entries = Vec::new();
+
+    let sql = if exclude_id.is_some() {
+        "SELECT id, title, content, analysis_summary, analysis_mood, analysis_insights, emotions, tags, last_analysis_conv_id, last_analysed_at, word_count, created_at, updated_at
+         FROM journal_entries
+         WHERE is_deleted = 0 AND id != ?1
+         ORDER BY created_at DESC
+         LIMIT ?2"
+    } else {
+        "SELECT id, title, content, analysis_summary, analysis_mood, analysis_insights, emotions, tags, last_analysis_conv_id, last_analysed_at, word_count, created_at, updated_at
+         FROM journal_entries
+         WHERE is_deleted = 0
+         ORDER BY created_at DESC
+         LIMIT ?1"
+    };
+
+    let mut stmt = conn.prepare(sql)?;
+
+    let rows = if let Some(id) = exclude_id {
+        stmt.query_map(params![id, limit], map_journal_entry)?
+    } else {
+        stmt.query_map(params![limit], map_journal_entry)?
+    };
+
+    for row in rows {
+        entries.push(row?);
+    }
+
+    Ok(entries)
+}
+
+pub fn list_entries_since(
+    conn: &Connection,
+    since_date: &str,
+) -> Result<Vec<JournalEntry>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, title, content, analysis_summary, analysis_mood, analysis_insights, emotions, tags, last_analysis_conv_id, last_analysed_at, word_count, created_at, updated_at
+         FROM journal_entries
+         WHERE is_deleted = 0 AND date(created_at) >= date(?1)
+         ORDER BY created_at DESC",
+    )?;
+
+    let rows = stmt.query_map(params![since_date], map_journal_entry)?;
+
+    let mut entries = Vec::new();
+    for row in rows {
+        entries.push(row?);
+    }
+
+    Ok(entries)
+}
+
 pub fn soft_delete(conn: &Connection, id: &str) -> Result<bool, AppError> {
     let result = conn.execute(
         "UPDATE journal_entries SET is_deleted = 1, updated_at = ?1 WHERE id = ?2 AND is_deleted = 0",
@@ -199,14 +256,18 @@ pub struct JournalSearchFilters {
     pub date_to: Option<String>,
 }
 
-pub fn search_entries(conn: &Connection, filters: &JournalSearchFilters) -> Result<Vec<serde_json::Value>, AppError> {
+pub fn search_entries(
+    conn: &Connection,
+    filters: &JournalSearchFilters,
+) -> Result<Vec<serde_json::Value>, AppError> {
     let mut query = String::from(
         "SELECT f.id, e.title, snippet(journal_fts, 2, '...', '...', '...', 10) as match, e.created_at
          FROM journal_fts f
          JOIN journal_entries e ON f.id = e.id
          WHERE f.content MATCH ? AND e.is_deleted = 0"
     );
-    let mut params_vals: Vec<rusqlite::types::Value> = vec![rusqlite::types::Value::Text(filters.query.clone())];
+    let mut params_vals: Vec<rusqlite::types::Value> =
+        vec![rusqlite::types::Value::Text(filters.query.clone())];
 
     if let Some(date_from) = &filters.date_from {
         query.push_str(" AND date(e.created_at) >= date(?)");
@@ -221,7 +282,10 @@ pub fn search_entries(conn: &Connection, filters: &JournalSearchFilters) -> Resu
     query.push_str(" ORDER BY rank LIMIT 10");
 
     let mut stmt = conn.prepare(&query)?;
-    let params_refs: Vec<&dyn rusqlite::ToSql> = params_vals.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
+    let params_refs: Vec<&dyn rusqlite::ToSql> = params_vals
+        .iter()
+        .map(|v| v as &dyn rusqlite::ToSql)
+        .collect();
 
     let rows = stmt.query_map(&*params_refs, |row| {
         Ok(serde_json::json!({
@@ -237,4 +301,22 @@ pub fn search_entries(conn: &Connection, filters: &JournalSearchFilters) -> Resu
         results.push(row?);
     }
     Ok(results)
+}
+
+fn map_journal_entry(row: &rusqlite::Row) -> rusqlite::Result<JournalEntry> {
+    Ok(JournalEntry {
+        id: row.get(0)?,
+        title: row.get(1)?,
+        content: row.get(2)?,
+        analysis_summary: row.get(3)?,
+        analysis_mood: row.get(4)?,
+        analysis_insights: row.get(5)?,
+        emotions: row.get(6)?,
+        tags: row.get(7)?,
+        last_analysis_conv_id: row.get(8)?,
+        last_analysed_at: row.get(9)?,
+        word_count: row.get(10)?,
+        created_at: row.get(11)?,
+        updated_at: row.get(12)?,
+    })
 }

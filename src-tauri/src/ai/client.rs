@@ -160,7 +160,7 @@ impl OllamaClient {
             ))
         })?;
 
-        AnalysisResult::from_raw(raw, id)
+        AnalysisResult::from_raw(raw, id, content)
             .map_err(|e| AppError::AiError(format!("Analysis response validation failed: {}", e)))
     }
 
@@ -198,8 +198,7 @@ impl OllamaClient {
             let error_text = response.text().await.unwrap_or_default();
             return Err(AppError::AiError(format!(
                 "HTTP error {}: {}",
-                status,
-                error_text
+                status, error_text
             )));
         }
 
@@ -239,24 +238,42 @@ impl OllamaClient {
         prompt: &str,
         mode: crate::ai::prompt::ChatMode,
     ) -> Result<String, AppError> {
-        let url = format!("{}/{}", self.base_url, OLLAMA_CHAT_URL);
-        
-        // Build one-off prompt input for single turn
         let input = crate::ai::prompt::PromptInput {
             mode,
             overdue_tasks: vec![],
             today_tasks: vec![],
             upcoming_tasks: vec![],
+            semantic_memory: vec![],
+            recent_patterns: vec![],
             related_journal: vec![],
             current_entry: None,
         };
+
+        self.chat_single_with_input(prompt, input).await
+    }
+
+    pub async fn chat_single_with_input(
+        &self,
+        prompt: &str,
+        input: crate::ai::prompt::PromptInput,
+    ) -> Result<String, AppError> {
+        let url = format!("{}/{}", self.base_url, OLLAMA_CHAT_URL);
+
         let system_prompt = crate::ai::prompt::build_system_prompt(&input);
 
         let request = ChatRequest {
             model: self.model.clone(),
             messages: vec![
-                ChatMessage { role: "system".into(), content: system_prompt, tool_calls: None },
-                ChatMessage { role: "user".into(), content: prompt.into(), tool_calls: None },
+                ChatMessage {
+                    role: "system".into(),
+                    content: system_prompt,
+                    tool_calls: None,
+                },
+                ChatMessage {
+                    role: "user".into(),
+                    content: prompt.into(),
+                    tool_calls: None,
+                },
             ],
             stream: false,
             tools: None,
@@ -266,7 +283,8 @@ impl OllamaClient {
             }),
         };
 
-        let response = self.http
+        let response = self
+            .http
             .post(&url)
             .json(&request)
             .send()
@@ -274,13 +292,19 @@ impl OllamaClient {
             .map_err(|e| AppError::AiError(format!("Chat connection failed: {}", e)))?;
 
         if !response.status().is_success() {
-            return Err(AppError::AiError(format!("Ollama error status: {}", response.status())));
+            return Err(AppError::AiError(format!(
+                "Ollama error status: {}",
+                response.status()
+            )));
         }
 
-        let body: serde_json::Value = response.json().await
+        let body: serde_json::Value = response
+            .json()
+            .await
             .map_err(|e| AppError::AiError(format!("Invalid response JSON: {}", e)))?;
 
-        let content = body.get("message")
+        let content = body
+            .get("message")
             .and_then(|m| m.get("content"))
             .and_then(|c| c.as_str())
             .ok_or_else(|| AppError::AiError("Missing content in Ollama response".into()))?;

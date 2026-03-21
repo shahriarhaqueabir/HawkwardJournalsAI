@@ -107,9 +107,15 @@ pub fn update_project(conn: &Connection, project: &Project) -> Result<(), AppErr
     Ok(())
 }
 
-pub fn soft_delete_project(conn: &Connection, id: &str, updated_at: &str) -> Result<bool, AppError> {
+pub fn soft_delete_project(
+    conn: &Connection,
+    id: &str,
+    updated_at: &str,
+) -> Result<bool, AppError> {
     if id == "inbox" {
-        return Err(AppError::InvalidInput("Inbox project cannot be deleted".into()));
+        return Err(AppError::InvalidInput(
+            "Inbox project cannot be deleted".into(),
+        ));
     }
 
     conn.execute(

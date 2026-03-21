@@ -59,6 +59,26 @@
     letter-spacing: 0.5px;
 }
 
+/* Insights */
+.insights-card {
+    gap: 10px;
+}
+
+.insights-list {
+    margin: 0;
+    padding-left: 18px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    color: var(--color-text);
+    font-size: 13px;
+    line-height: 1.35;
+}
+
+.insights-list li {
+    opacity: 0.95;
+}
+
 /* Metric Cards */
 .metric-row {
     grid-column: span 2;
@@ -117,6 +137,47 @@
 canvas {
     max-height: 300px;
     width: 100% !important;
+}
+
+.report-svg {
+    width: 100%;
+    height: 300px;
+    display: block;
+}
+
+.report-svg text {
+    fill: var(--color-muted);
+    font-size: 11px;
+}
+
+.report-svg .axis {
+    stroke: rgba(255, 255, 255, 0.10);
+    stroke-width: 1;
+}
+
+.report-svg .grid {
+    stroke: rgba(255, 255, 255, 0.06);
+    stroke-width: 1;
+}
+
+.report-svg .line {
+    fill: none;
+    stroke-width: 2.25;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+}
+
+.report-svg .area {
+    opacity: 0.16;
+}
+
+.report-svg .bar {
+    opacity: 0.85;
+}
+
+.report-svg .legend {
+    font-size: 12px;
+    fill: var(--color-muted);
 }
 
 .chart-fallback {

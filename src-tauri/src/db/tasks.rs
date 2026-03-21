@@ -41,6 +41,9 @@ pub struct Task {
 #[derive(Debug, Deserialize, Serialize, Default, Clone)]
 #[serde(rename_all = "snake_case")]
 pub struct TaskListFilters {
+    pub query: Option<String>,
+    pub match_recent: Option<bool>,
+    pub limit: Option<u32>,
     pub statuses: Option<Vec<String>>,
     pub exclude_statuses: Option<Vec<String>>,
     pub priorities: Option<Vec<String>>,
@@ -111,11 +114,33 @@ pub fn list_tasks(conn: &Connection, filters: TaskListFilters) -> Result<Vec<Tas
     let mut query = "SELECT * FROM tasks WHERE is_deleted = 0".to_string();
     let mut params_vals: Vec<rusqlite::types::Value> = Vec::new();
 
+    let match_recent = filters.match_recent.unwrap_or(false);
+    let limit = filters.limit;
+
+    if let Some(q) = filters.query {
+        let trimmed = q.trim();
+        if !trimmed.is_empty() {
+            let pattern = format!("%{}%", trimmed.to_ascii_lowercase());
+            query.push_str(
+                " AND (
+                    LOWER(title) LIKE ?
+                    OR LOWER(COALESCE(description, '')) LIKE ?
+                    OR LOWER(COALESCE(notes, '')) LIKE ?
+                )",
+            );
+            params_vals.push(rusqlite::types::Value::Text(pattern.clone()));
+            params_vals.push(rusqlite::types::Value::Text(pattern.clone()));
+            params_vals.push(rusqlite::types::Value::Text(pattern));
+        }
+    }
+
     if let Some(statuses) = filters.statuses {
         if !statuses.is_empty() {
             let placeholders = statuses.iter().map(|_| "?").collect::<Vec<_>>().join(",");
             query.push_str(&format!(" AND status IN ({})", placeholders));
-            for s in statuses { params_vals.push(rusqlite::types::Value::Text(s)); }
+            for s in statuses {
+                params_vals.push(rusqlite::types::Value::Text(s));
+            }
         }
     }
 
@@ -123,7 +148,9 @@ pub fn list_tasks(conn: &Connection, filters: TaskListFilters) -> Result<Vec<Tas
         if !exclude.is_empty() {
             let placeholders = exclude.iter().map(|_| "?").collect::<Vec<_>>().join(",");
             query.push_str(&format!(" AND status NOT IN ({})", placeholders));
-            for s in exclude { params_vals.push(rusqlite::types::Value::Text(s)); }
+            for s in exclude {
+                params_vals.push(rusqlite::types::Value::Text(s));
+            }
         }
     }
 
@@ -131,7 +158,9 @@ pub fn list_tasks(conn: &Connection, filters: TaskListFilters) -> Result<Vec<Tas
         if !priorities.is_empty() {
             let placeholders = priorities.iter().map(|_| "?").collect::<Vec<_>>().join(",");
             query.push_str(&format!(" AND priority IN ({})", placeholders));
-            for p in priorities { params_vals.push(rusqlite::types::Value::Text(p)); }
+            for p in priorities {
+                params_vals.push(rusqlite::types::Value::Text(p));
+            }
         }
     }
 
@@ -149,7 +178,9 @@ pub fn list_tasks(conn: &Connection, filters: TaskListFilters) -> Result<Vec<Tas
         if !energy.is_empty() {
             let placeholders = energy.iter().map(|_| "?").collect::<Vec<_>>().join(",");
             query.push_str(&format!(" AND energy_level IN ({})", placeholders));
-            for e in energy { params_vals.push(rusqlite::types::Value::Text(e)); }
+            for e in energy {
+                params_vals.push(rusqlite::types::Value::Text(e));
+            }
         }
     }
 
@@ -157,7 +188,9 @@ pub fn list_tasks(conn: &Connection, filters: TaskListFilters) -> Result<Vec<Tas
         if !context.is_empty() {
             let placeholders = context.iter().map(|_| "?").collect::<Vec<_>>().join(",");
             query.push_str(&format!(" AND context_tag IN ({})", placeholders));
-            for c in context { params_vals.push(rusqlite::types::Value::Text(c)); }
+            for c in context {
+                params_vals.push(rusqlite::types::Value::Text(c));
+            }
         }
     }
 
@@ -178,10 +211,22 @@ pub fn list_tasks(conn: &Connection, filters: TaskListFilters) -> Result<Vec<Tas
         }
     }
 
-    query.push_str(" ORDER BY priority DESC, due_date ASC");
+    if match_recent {
+        query.push_str(" ORDER BY created_at DESC");
+    } else {
+        query.push_str(" ORDER BY priority DESC, due_date ASC");
+    }
+
+    if let Some(lim) = limit {
+        query.push_str(" LIMIT ?");
+        params_vals.push(rusqlite::types::Value::Integer(lim as i64));
+    }
 
     let mut stmt = conn.prepare(&query)?;
-    let params_refs: Vec<&dyn rusqlite::ToSql> = params_vals.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
+    let params_refs: Vec<&dyn rusqlite::ToSql> = params_vals
+        .iter()
+        .map(|v| v as &dyn rusqlite::ToSql)
+        .collect();
 
     let rows = stmt.query_map(&*params_refs, |row| {
         Ok(Task {
@@ -227,8 +272,12 @@ pub fn list_tasks(conn: &Connection, filters: TaskListFilters) -> Result<Vec<Tas
 
 pub fn update_task_status(conn: &Connection, id: &str, status: &str) -> Result<(), AppError> {
     let now = Utc::now().to_rfc3339();
-    let completed_at = if status == "done" { Some(now.clone()) } else { None };
-    
+    let completed_at = if status == "done" {
+        Some(now.clone())
+    } else {
+        None
+    };
+
     let rows = conn.execute(
         "UPDATE tasks SET status = ?1, updated_at = ?2, completed_at = ?3 WHERE id = ?4",
         params![status, now, completed_at, id],
@@ -342,14 +391,28 @@ pub fn update_task(conn: &Connection, task: &Task) -> Result<(), AppError> {
 }
 
 pub fn search_tasks(conn: &Connection, query: &str) -> Result<Vec<Task>, AppError> {
-    let sql_query = format!("%{}%", query);
+    let sql_query = format!("%{}%", query.to_ascii_lowercase());
     let mut stmt = conn.prepare(
-        "SELECT * FROM tasks 
-         WHERE is_deleted = 0 AND (title LIKE ?1 OR description LIKE ?1 OR project LIKE ?1)
-         ORDER BY priority DESC, created_at DESC"
+        "SELECT * FROM tasks
+         WHERE is_deleted = 0
+           AND (
+                LOWER(title) LIKE ?1
+                OR LOWER(COALESCE(description, '')) LIKE ?1
+                OR LOWER(COALESCE(notes, '')) LIKE ?1
+           )
+         ORDER BY
+            CASE
+                WHEN LOWER(title) = ?2 THEN 0
+                WHEN LOWER(title) LIKE ?3 THEN 1
+                ELSE 2
+            END,
+            created_at DESC
+         LIMIT 10",
     )?;
-    
-    let rows = stmt.query_map(params![sql_query], |row| {
+    let exact_query = query.trim().to_ascii_lowercase();
+    let starts_with_query = format!("{}%", exact_query);
+
+    let rows = stmt.query_map(params![sql_query, exact_query, starts_with_query], |row| {
         Ok(Task {
             id: row.get("id")?,
             parent_task_id: row.get("parent_task_id")?,
@@ -392,20 +455,27 @@ pub fn search_tasks(conn: &Connection, query: &str) -> Result<Vec<Task>, AppErro
 }
 
 pub fn timer_start(conn: &Connection, task_id: &str) -> Result<String, AppError> {
-    let task = get_task(conn, task_id)?.ok_or_else(|| AppError::InvalidInput("Task not found".into()))?;
+    let task =
+        get_task(conn, task_id)?.ok_or_else(|| AppError::InvalidInput("Task not found".into()))?;
     if task.status == "done" || task.status == "cancelled" {
-        return Err(AppError::InvalidInput("Cannot start timer on completed or cancelled task".into()));
+        return Err(AppError::InvalidInput(
+            "Cannot start timer on completed or cancelled task".into(),
+        ));
     }
-    
-    let mut stmt = conn.prepare("SELECT id FROM time_logs WHERE task_id = ?1 AND ended_at IS NULL")?;
-    let open_timer = match stmt.query_row(rusqlite::params![task_id], |row| row.get::<_, String>(0)) {
+
+    let mut stmt =
+        conn.prepare("SELECT id FROM time_logs WHERE task_id = ?1 AND ended_at IS NULL")?;
+    let open_timer = match stmt.query_row(rusqlite::params![task_id], |row| row.get::<_, String>(0))
+    {
         Ok(id) => Some(id),
         Err(rusqlite::Error::QueryReturnedNoRows) => None,
         Err(e) => return Err(AppError::Database(e.to_string())),
     };
 
     if open_timer.is_some() {
-        return Err(AppError::InvalidInput("Task already has an open timer".into()));
+        return Err(AppError::InvalidInput(
+            "Task already has an open timer".into(),
+        ));
     }
 
     let now = Utc::now().to_rfc3339();
@@ -424,22 +494,28 @@ pub fn timer_start(conn: &Connection, task_id: &str) -> Result<String, AppError>
 }
 
 pub fn timer_stop(conn: &Connection, task_id: &str) -> Result<(), AppError> {
-    let mut stmt = conn.prepare("SELECT id, started_at FROM time_logs WHERE task_id = ?1 AND ended_at IS NULL")?;
-    
+    let mut stmt = conn
+        .prepare("SELECT id, started_at FROM time_logs WHERE task_id = ?1 AND ended_at IS NULL")?;
+
     let timer_info = stmt.query_row(rusqlite::params![task_id], |row| {
         Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
     });
 
     let (log_id, started_at) = match timer_info {
         Ok(info) => info,
-        Err(rusqlite::Error::QueryReturnedNoRows) => return Err(AppError::InvalidInput("No open timer found for this task".into())),
+        Err(rusqlite::Error::QueryReturnedNoRows) => {
+            return Err(AppError::InvalidInput(
+                "No open timer found for this task".into(),
+            ))
+        }
         Err(e) => return Err(AppError::Database(e.to_string())),
     };
 
     let now = Utc::now();
     let started = chrono::DateTime::parse_from_rfc3339(&started_at)
-        .map_err(|e| AppError::InvalidInput(e.to_string()))?.with_timezone(&Utc);
-    
+        .map_err(|e| AppError::InvalidInput(e.to_string()))?
+        .with_timezone(&Utc);
+
     let duration_secs = (now - started).num_seconds() as i32;
 
     conn.execute(
@@ -455,23 +531,39 @@ pub fn timer_stop(conn: &Connection, task_id: &str) -> Result<(), AppError> {
     Ok(())
 }
 
-pub fn task_add_dependency(conn: &Connection, blocked_task_id: &str, blocking_task_id: &str) -> Result<(), AppError> {
+pub fn task_add_dependency(
+    conn: &Connection,
+    blocked_task_id: &str,
+    blocking_task_id: &str,
+) -> Result<(), AppError> {
     if blocked_task_id == blocking_task_id {
-        return Err(AppError::InvalidInput("A task cannot depend on itself".into()));
+        return Err(AppError::InvalidInput(
+            "A task cannot depend on itself".into(),
+        ));
     }
 
     let now = Utc::now().to_rfc3339();
     let dep_id = uuid::Uuid::new_v4().to_string();
 
-    let mut stmt = conn.prepare("SELECT id FROM task_dependencies WHERE blocked_task_id = ?1 AND blocking_task_id = ?2")?;
+    let mut stmt = conn.prepare(
+        "SELECT id FROM task_dependencies WHERE blocked_task_id = ?1 AND blocking_task_id = ?2",
+    )?;
     let circular_exists = stmt.exists(rusqlite::params![blocking_task_id, blocked_task_id])?;
     if circular_exists {
-        return Err(AppError::InvalidInput("Circular dependency detected".into()));
+        return Err(AppError::InvalidInput(
+            "Circular dependency detected".into(),
+        ));
     }
 
-    let count: i64 = conn.query_row("SELECT COUNT(*) FROM task_dependencies WHERE blocked_task_id = ?1", rusqlite::params![blocked_task_id], |row| row.get(0))?;
+    let count: i64 = conn.query_row(
+        "SELECT COUNT(*) FROM task_dependencies WHERE blocked_task_id = ?1",
+        rusqlite::params![blocked_task_id],
+        |row| row.get(0),
+    )?;
     if count >= 10 {
-        return Err(AppError::InvalidInput("Maximum 10 dependencies allowed per task".into()));
+        return Err(AppError::InvalidInput(
+            "Maximum 10 dependencies allowed per task".into(),
+        ));
     }
 
     conn.execute(
@@ -482,7 +574,11 @@ pub fn task_add_dependency(conn: &Connection, blocked_task_id: &str, blocking_ta
     Ok(())
 }
 
-pub fn task_remove_dependency(conn: &Connection, blocked_task_id: &str, blocking_task_id: &str) -> Result<(), AppError> {
+pub fn task_remove_dependency(
+    conn: &Connection,
+    blocked_task_id: &str,
+    blocking_task_id: &str,
+) -> Result<(), AppError> {
     conn.execute(
         "DELETE FROM task_dependencies WHERE blocked_task_id = ?1 AND blocking_task_id = ?2",
         rusqlite::params![blocked_task_id, blocking_task_id],
@@ -511,7 +607,7 @@ pub fn attachment_add(
     let source_path = std::path::Path::new(source_path_str);
     let id = uuid::Uuid::new_v4().to_string();
     let created_at = Utc::now().to_rfc3339();
-    
+
     // Ensure attachments directory exists
     let data_dir = crate::db::paths::resolve_data_dir();
     let attach_dir = data_dir.join("attachments");
@@ -519,30 +615,32 @@ pub fn attachment_add(
         std::fs::create_dir_all(&attach_dir)
             .map_err(|e| AppError::Io(format!("Failed to create attachments dir: {}", e)))?;
     }
-    
-    let original_name = source_path.file_name()
+
+    let original_name = source_path
+        .file_name()
         .map(|s| s.to_string_lossy().to_string())
         .unwrap_or_else(|| format!("attachment_{}.bin", id));
-        
+
     let new_file_name = format!("{}_{}", id, original_name);
     let dest_path = attach_dir.join(&new_file_name);
-    
+
     std::fs::copy(source_path, &dest_path)
         .map_err(|e| AppError::Io(format!("Failed to copy attachment: {}", e)))?;
-    
+
     let size_bytes = std::fs::metadata(&dest_path).map(|m| m.len() as i64).ok();
-    
-    let mime_type = source_path.extension()
+
+    let mime_type = source_path
+        .extension()
         .map(|e| e.to_string_lossy().to_lowercase());
-    
+
     let relative_path = format!("attachments/{}", new_file_name); // D-47
-    
+
     conn.execute(
         "INSERT INTO task_attachments (id, task_id, file_name, file_path, mime_type, size_bytes, file_missing, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)",
          rusqlite::params![id, task_id, original_name, relative_path, mime_type, size_bytes, created_at]
     )?;
-    
+
     Ok(TaskAttachment {
         id,
         task_id: task_id.to_string(),
@@ -558,9 +656,9 @@ pub fn attachment_add(
 pub fn attachment_list(conn: &Connection, task_id: &str) -> Result<Vec<TaskAttachment>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT id, task_id, file_name, file_path, mime_type, size_bytes, file_missing, created_at 
-         FROM task_attachments WHERE task_id = ?1 ORDER BY created_at DESC"
+         FROM task_attachments WHERE task_id = ?1 ORDER BY created_at DESC",
     )?;
-    
+
     let rows = stmt.query_map(rusqlite::params![task_id], |row| {
         Ok(TaskAttachment {
             id: row.get(0)?,
@@ -573,51 +671,124 @@ pub fn attachment_list(conn: &Connection, task_id: &str) -> Result<Vec<TaskAttac
             created_at: row.get(7)?,
         })
     })?;
-    
+
     let mut results = Vec::new();
     let data_dir = crate::db::paths::resolve_data_dir();
-    
+
     for row in rows {
         let mut att = row?;
         let absolute_path = data_dir.join(&att.file_path);
         let actual_missing = if absolute_path.exists() { 0 } else { 1 };
-        
+
         if att.file_missing != actual_missing {
             let _ = conn.execute(
-                "UPDATE task_attachments SET file_missing = ?1 WHERE id = ?2", 
-                rusqlite::params![actual_missing, att.id]
+                "UPDATE task_attachments SET file_missing = ?1 WHERE id = ?2",
+                rusqlite::params![actual_missing, att.id],
             );
             att.file_missing = actual_missing;
         }
         results.push(att);
     }
-    
+
     Ok(results)
 }
 
 pub fn attachment_remove(conn: &Connection, id: &str) -> Result<(), AppError> {
     let mut stmt = conn.prepare("SELECT file_path FROM task_attachments WHERE id = ?1")?;
     let path: Option<String> = stmt.query_row(rusqlite::params![id], |r| r.get(0)).ok();
-    
+
     if let Some(rel_path) = path {
         let absolute_path = crate::db::paths::resolve_data_dir().join(rel_path);
         if absolute_path.exists() {
             let _ = std::fs::remove_file(absolute_path);
         }
     }
-    
-    conn.execute("DELETE FROM task_attachments WHERE id = ?1", rusqlite::params![id])?;
+
+    conn.execute(
+        "DELETE FROM task_attachments WHERE id = ?1",
+        rusqlite::params![id],
+    )?;
     Ok(())
 }
 
 use tauri::Manager;
 
-pub async fn execute_ai_tool(app: &tauri::AppHandle, name: &str, args: serde_json::Value) -> Result<serde_json::Value, AppError> {
+pub async fn execute_ai_tool(
+    app: &tauri::AppHandle,
+    name: &str,
+    args: serde_json::Value,
+) -> Result<serde_json::Value, AppError> {
     let conn_arc = app.state::<crate::AppState>().conn.clone();
-    
+
+    fn resolve_task_reference(conn: &Connection, raw: &str) -> Result<String, AppError> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Err(AppError::InvalidInput("Missing task ID".into()));
+        }
+
+        if uuid::Uuid::parse_str(trimmed).is_ok() {
+            return Ok(trimmed.to_string());
+        }
+
+        let is_short_id = trimmed.len() >= 6
+            && trimmed.len() <= 12
+            && trimmed.chars().all(|c| c.is_ascii_hexdigit());
+
+        if is_short_id {
+            let like = format!("{}%", trimmed);
+            let mut stmt = conn.prepare(
+                "SELECT id FROM tasks WHERE is_deleted = 0 AND id LIKE ?1 ORDER BY updated_at DESC LIMIT 6",
+            )?;
+            let rows = stmt
+                .query_map(params![like], |row| row.get::<_, String>(0))?
+                .collect::<Result<Vec<_>, _>>()?;
+
+            match rows.len() {
+                1 => return Ok(rows[0].clone()),
+                2.. => {
+                    let options = rows
+                        .iter()
+                        .take(5)
+                        .map(|id| format!("[{}]", &id[..6.min(id.len())]))
+                        .collect::<Vec<_>>()
+                        .join(", ");
+                    return Err(AppError::InvalidInput(format!(
+                        "Multiple tasks match '{}': {}. Ask the user which one.",
+                        trimmed, options
+                    )));
+                }
+                _ => {}
+            }
+        }
+
+        let results = search_tasks(conn, trimmed)?;
+        match results.len() {
+            0 => Err(AppError::NotFound(format!(
+                "No task found matching '{}'. Ask the user to clarify.",
+                trimmed
+            ))),
+            1 => Ok(results[0].id.clone()),
+            _ => {
+                let titles = results
+                    .iter()
+                    .take(5)
+                    .map(|task| format!("[{}] {}", &task.id[..6.min(task.id.len())], task.title))
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                Err(AppError::InvalidInput(format!(
+                    "Multiple tasks match '{}': {}. Ask the user which one.",
+                    trimmed, titles
+                )))
+            }
+        }
+    }
+
     match name {
         "create_task" => {
-            let title = args["title"].as_str().ok_or_else(|| AppError::InvalidInput("Missing title".into()))?.to_string();
+            let title = args["title"]
+                .as_str()
+                .ok_or_else(|| AppError::InvalidInput("Missing title".into()))?
+                .to_string();
             let priority = args["priority"].as_str().map(|s| s.to_string());
             let due_date = args["due_date"].as_str().map(|s| s.to_string());
             let project_id = args["project_id"].as_str().map(|s| s.to_string());
@@ -661,56 +832,119 @@ pub async fn execute_ai_tool(app: &tauri::AppHandle, name: &str, args: serde_jso
             let conn = conn_arc.lock().await;
             normalize_task_project(&conn, &mut task)?;
             create_task(&conn, &task)?;
-            
-            crate::events::emit(app, crate::events::AppEvent::TaskCreated { 
-                id: task.id.clone(), 
-                title: task.title.clone() 
-            });
+
+            crate::events::emit(
+                app,
+                crate::events::AppEvent::TaskCreated {
+                    id: task.id.clone(),
+                    title: task.title.clone(),
+                },
+            );
 
             Ok(serde_json::to_value(task).unwrap())
         }
         "update_task" => {
-            let id = args["id"].as_str().ok_or_else(|| AppError::InvalidInput("Missing task ID".into()))?.to_string();
+            let id = args["id"]
+                .as_str()
+                .ok_or_else(|| AppError::InvalidInput("Missing task ID".into()))?
+                .to_string();
             let conn = conn_arc.lock().await;
-            
-            let mut task = get_task(&conn, &id)?.ok_or_else(|| AppError::InvalidInput("Task not found".into()))?;
-            
-            if let Some(t) = args["title"].as_str() { task.title = t.to_string(); }
-            if let Some(s) = args["status"].as_str() { 
-                task.status = s.to_string(); 
+
+            let resolved_id = resolve_task_reference(&conn, &id)?;
+            let mut task = get_task(&conn, &resolved_id)?
+                .ok_or_else(|| AppError::InvalidInput("Task not found".into()))?;
+
+            if let Some(t) = args["title"].as_str() {
+                task.title = t.to_string();
+            }
+            if let Some(s) = args["status"].as_str() {
+                task.status = s.to_string();
                 if task.status == "done" {
                     task.completed_at = Some(Utc::now().to_rfc3339());
                 } else {
                     task.completed_at = None;
                 }
             }
-            if let Some(p) = args["priority"].as_str() { task.priority = p.to_string(); }
-            if let Some(d) = args["due_date"].as_str() { task.due_date = Some(d.to_string()); }
-            
+            if let Some(p) = args["priority"].as_str() {
+                task.priority = p.to_string();
+            }
+            if let Some(d) = args["due_date"].as_str() {
+                task.due_date = Some(d.to_string());
+            }
+
             task.updated_at = Utc::now().to_rfc3339();
             normalize_task_project(&conn, &mut task)?;
             update_task(&conn, &task)?;
 
-            crate::events::emit(app, crate::events::AppEvent::TaskUpdated { id: id.clone() });
+            crate::events::emit(
+                app,
+                crate::events::AppEvent::TaskUpdated {
+                    id: resolved_id.clone(),
+                },
+            );
             Ok(serde_json::to_value(task).unwrap())
         }
         "complete_task" => {
-            let id = args["id"].as_str().ok_or_else(|| AppError::InvalidInput("Missing task ID".into()))?.to_string();
-            update_task_status_internal(app, &id, "done").await?;
-            Ok(serde_json::json!({ "status": "success", "id": id }))
+            let id = args["id"]
+                .as_str()
+                .ok_or_else(|| AppError::InvalidInput("Missing task ID".into()))?
+                .to_string();
+            let conn = conn_arc.lock().await;
+            let resolved_id = resolve_task_reference(&conn, &id)?;
+            drop(conn);
+
+            update_task_status_internal(app, &resolved_id, "done").await?;
+            Ok(serde_json::json!({ "status": "success", "id": resolved_id }))
         }
-        _ => Err(AppError::InvalidInput(format!("Tool {} not supported in task executor", name)))
+        "delete_task" => {
+            let id = args["id"]
+                .as_str()
+                .ok_or_else(|| AppError::InvalidInput("Missing task ID".into()))?
+                .to_string();
+
+            let conn = conn_arc.lock().await;
+            let resolved_id = resolve_task_reference(&conn, &id)?;
+            let deleted = soft_delete(&conn, &resolved_id)?;
+            drop(conn);
+
+            if !deleted {
+                return Err(AppError::NotFound("Task not found".into()));
+            }
+
+            crate::events::emit(
+                app,
+                crate::events::AppEvent::TaskDeleted {
+                    id: resolved_id.clone(),
+                },
+            );
+
+            Ok(serde_json::json!({ "status": "deleted", "id": resolved_id }))
+        }
+        _ => Err(AppError::InvalidInput(format!(
+            "Tool {} not supported in task executor",
+            name
+        ))),
     }
 }
 
-async fn update_task_status_internal(app: &tauri::AppHandle, id: &str, status: &str) -> Result<(), AppError> {
+async fn update_task_status_internal(
+    app: &tauri::AppHandle,
+    id: &str,
+    status: &str,
+) -> Result<(), AppError> {
     let conn_arc = app.state::<crate::AppState>().conn.clone();
     let conn = conn_arc.lock().await;
     update_task_status(&conn, id, status)?;
     if status == "done" {
-        crate::events::emit(app, crate::events::AppEvent::TaskCompleted { id: id.to_string() });
+        crate::events::emit(
+            app,
+            crate::events::AppEvent::TaskCompleted { id: id.to_string() },
+        );
     } else {
-        crate::events::emit(app, crate::events::AppEvent::TaskUpdated { id: id.to_string() });
+        crate::events::emit(
+            app,
+            crate::events::AppEvent::TaskUpdated { id: id.to_string() },
+        );
     }
     Ok(())
 }

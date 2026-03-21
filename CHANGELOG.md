@@ -132,6 +132,11 @@
 
 ### Phase 3 Audit & Scheduler Fixes
 
+- **AI Analysis Resilience**:
+  - Hardened `src-tauri/src/ai/mod.rs` so journal analysis can recover when Ollama returns a blank `summary` or `mood`, using insight/source-text fallbacks instead of failing the sidebar analysis outright.
+  - Updated `src-tauri/src/ai/client.rs` to pass the journal content into analysis normalization so fallback summaries can be derived deterministically from the saved entry text.
+- **Formatting Cleanup**:
+  - Removed trailing whitespace in `src-tauri/src/lib.rs` and `src-tauri/src/db/ai.rs` so `cargo fmt` runs cleanly again.
 - **Build Fixes**:
   - Fixed `src-tauri/src/scheduler/weekly_report.rs` imports for `rusqlite::params` and `tauri::Manager`.
   - Removed the unused `AnalysisResult` import in `src-tauri/src/ai/analysis.rs`.
@@ -140,6 +145,68 @@
   - Fixed the background scheduler in `src-tauri/src/lib.rs` to actually await the Monday weekly review future.
   - Weekly review completion is now recorded only after a successful AI response, preventing false "already ran" state after failures.
   - Emitted the typed `WeeklyReviewGenerated` event in addition to the existing system status toast.
+- **Task Tab UX Fixes**:
+  - Updated `src/index.html`, `src/js/tabs/tasks.js`, and `src/styles/tasks.css` to add explicit task view switching with `Kanban`, `List`, and `Calendar` views.
+  - Added list/calendar rendering in `src/js/tabs/tasks.js` so due-dated tasks are now visible in a real calendar-style grouped view instead of the previously missing calendar surface.
+  - Hardened drag/drop status changes in `src/js/tabs/tasks.js` by reading the destination status from explicit `data-status` attributes on drop columns.
+  - Added an explicit `Manage` projects button in the task header and made project rows in the project modal clearly clickable for editing existing projects.
+  - Updated modal sizing in `src/styles/components.css` so the project management list is scrollable and accessible when many projects exist.
+- **Verification**:
+  - `node --check src/js/tabs/tasks.js`
+  - `node --check src/js/ai-sidebar.js`
+  - `cargo test -q` (src-tauri)
+
+- **Companion Nudge + Reflection Runtime**:
+  - Added `src-tauri/src/ai/companion.rs` to drive proactive nudges and reflection prompts on top of the shared semantic-memory layer, including app-settings-backed dedupe history for weekly nudges and 7-day reflection prompt reuse protection.
+  - Extended `src-tauri/src/ai/prompt.rs` with `ProactiveNudge` and `ReflectionPrompt` modes so Ollama can generate short companion nudges and entry prompts without tool use.
+  - Added `ai_maybe_emit_proactive_nudge` and `ai_generate_reflection_prompt` commands in `src-tauri/src/lib.rs`, and new `AiProactiveNudge` / `AiReflectionPrompt` events in `src-tauri/src/events.rs`.
+  - Updated `src/js/ai-sidebar.js` and `src/index.html` so the always-mounted right sidebar now renders proactive companion cards and reflection prompts, supports dismiss, supports “Try Another,” and requests an app-open nudge automatically.
+  - Updated `src/js/tabs/journal.js` so new blank entries schedule a reflection prompt after 1.2s and an empty-entry proactive nudge after 30s of inactivity.
+  - Added sidebar companion card styling in `src/styles/ai-chat.css`.
+- **Tests & Verification**:
+  - Added companion history/decision tests in `src-tauri/src/ai/companion.rs`.
+  - `cargo fmt` (src-tauri)
+  - `cargo test -q` (src-tauri)
+  - `node --check src/js/ai-sidebar.js`
+  - `node --check src/js/tabs/journal.js`
+
+- **AI Companion Test Coverage**:
+  - Added in-memory DB tests in `src-tauri/src/ai/memory.rs` covering semantic-memory assembly, recent-pattern generation, current-entry binding, entry exclusion from related-memory snippets, and empty-database fallback behavior.
+  - Added prompt rendering coverage in `src-tauri/src/ai/prompt.rs` for semantic memory, recent patterns, related journal memory, and current-entry blocks.
+  - Added weekly scheduler tests in `src-tauri/src/scheduler/weekly_report.rs` for `has_review_run_this_week` across missing, current-week, and invalid-date settings values.
+- **Verification**:
+  - `cargo fmt` (src-tauri)
+  - `cargo test -q` (src-tauri)
+
+- **AI Semantic Memory Layer**:
+  - Added `src-tauri/src/ai/memory.rs` to build reusable prompt memory from existing journal/task data: semantic memory bullets (cadence, streak, dominant moods, recurring tags/emotions/insights, task open loops), recent journal patterns, related journal snippets, and optional bound entry context.
+  - Updated `src-tauri/src/lib.rs` so `ai_chat` now uses the shared memory builder instead of ad hoc recent-entry injection.
+  - Extended `src-tauri/src/ai/prompt.rs` with a dedicated `semantic_memory` prompt block so the companion can reason from higher-level patterns instead of only raw snippets.
+  - Updated `src-tauri/src/ai/client.rs` with `chat_single_with_input(...)` so non-chat AI flows can reuse the same prompt-memory contract.
+  - Updated `src-tauri/src/scheduler/weekly_report.rs` so the weekly review now receives the same semantic journal memory layer as AI chat.
+  - Added `list_entries_since` in `src-tauri/src/db/journal.rs` and reused `get_conversation` in `src-tauri/src/db/ai.rs` to support semantic-memory assembly without schema changes.
+- **Verification**:
+  - `cargo fmt` (src-tauri)
+  - `cargo test -q` (src-tauri)
+
+- **AI Chat Journal Memory Injection**:
+  - Updated `src-tauri/src/lib.rs` so `ai_chat` now injects compact journal memory into the system prompt: recent analyzed entry patterns, recent journal memory snippets, and bound `source_entry_id` entry context when the chat is opened from a journal entry.
+  - Added prompt-safe truncation and lightweight pattern synthesis in `src-tauri/src/lib.rs` to keep companion context useful without overloading the token budget.
+  - Extended `PromptInput` in `src-tauri/src/ai/prompt.rs` with a `recent_patterns` layer and rendered it as a dedicated prompt block.
+  - Added `get_conversation` in `src-tauri/src/db/ai.rs` so existing AI chats retain their linked journal entry context across later turns.
+  - Added `list_recent_entries` in `src-tauri/src/db/journal.rs` for recent-memory prompt injection without changing persistence.
+- **Verification**:
+  - `cargo fmt` (src-tauri)
+  - `cargo test -q` (src-tauri)
+
+- **AI Companion Prompt Alignment**:
+  - Updated `src-tauri/src/ai/prompt.rs` to align the live chat persona with `AgentDocs/HowAiShouldBehave.md`: stronger companion identity, anti-sycophancy rules, one-question limit, natural memory/pattern use, no unprompted task generation, and more reflective mode guidance without breaking the existing plain-text/tool-call runtime.
+  - Softened the journal analysis prompt language in `src-tauri/src/ai/prompt.rs` to avoid a clinical tone while keeping the strict JSON extraction contract intact.
+  - Added prompt-focused tests in `src-tauri/src/ai/prompt.rs` covering companion identity and realistic weekly-plan guidance.
+- **Verification**:
+  - `cargo fmt` (src-tauri)
+  - `cargo test -q prompt` (src-tauri)
+
 - **AI Chat Context Safety**:
   - Fixed `src-tauri/src/lib.rs` so historical assistant `tool_calls` are no longer re-injected into later chat turns, preventing stale tool replays from prior messages.
 
@@ -163,6 +230,95 @@
 - **Agent Alignment Review**: Evaluated current branch state against `PersonalLifeOS_MASTER_SPEC_v1.6` and `ADDENDUM_v1.7`.
 - **Created Handover Document**: Recorded current milestones, target features, and spec deviations into `AgentDocs/HandoverState.md`.
 - **Status Update**: Updated `AGENTS.md` to reflect Phase 2 conclusion and pivot into Phase 3/4. Noted the active architectural deviation pertaining to Project objects (D-13).
+
+### Reports IPC + AI Sidebar Chat Fixes
+
+- **Reports Backend Hardening**:
+  - Added `days` input validation to `get_report_summary` in `src-tauri/src/lib.rs` (1–365) to avoid invalid IPC payloads.
+  - Made `src-tauri/src/db/reports.rs` fail-soft so missing/partial report schema (views/tables) returns empty sections instead of failing the entire IPC call.
+- **AI Sidebar Chat Reliability**:
+  - Updated `src-tauri/src/ai/tools.rs` to strip blank optional string fields (e.g., `due_before: ""`) before validating/deserializing tool arguments, preventing repeated ISO-date validation loops.
+  - Updated `src/js/ai-sidebar.js` to persist `conversationId` across sidebar messages (D-105), instead of creating a new conversation on every send.
+- **Verification**:
+  - `cargo test -q` (src-tauri)
+
+### AI Bulk-Intent Understanding (Task IDs)
+
+- **Tool ID Validation**:
+  - Tightened `update_task` / `complete_task` tool schemas and validation in `src-tauri/src/ai/tools.rs` so human phrases like `"all tasks"` can’t be misinterpreted as a task ID.
+- **ID Prefix Resolution**:
+  - Updated `src-tauri/src/db/tasks.rs` AI tool executor to resolve short task-id prefixes (from compact context injection like `[a1b2c3]`) to full UUIDs, with clear errors for not-found or ambiguous prefixes.
+- **Prompt Rule**:
+  - Updated `src-tauri/src/ai/prompt.rs` to treat phrases like “all tasks / everything / delete all” as bulk requests and ask a clarifying question or explain limitations instead of inventing a task name.
+- **Verification**:
+  - `cargo test -q` (src-tauri)
+
+### Reports Upgrade: More Insights + More Charts
+
+- **Backend Report Enrichment**:
+  - Extended `get_report_summary` payload in `src-tauri/src/db/reports.rs` with journal consistency (entries/words per day), mood distribution, task status breakdown, due-date buckets, completion rate, streak days, and an `insights` list.
+- **Frontend Report Visuals**:
+  - Expanded the Reports tab layout in `src/index.html` with new cards (Highlights, Journal Consistency, Mood Distribution, Task Status, Due Buckets).
+  - Updated `src/js/tabs/reports.js` to render the new sections and added lightweight SVG chart fallbacks so charts still render even when Chart.js is not vendored yet.
+  - Added SVG chart styling in `src/styles/reports.css` for consistent dark-theme presentation.
+- **Verification**:
+  - `cargo test -q` (src-tauri)
+  - `node --check src/js/tabs/reports.js`
+
+### AI Chat Tool Robustness (Task Listing + IDs)
+
+- **Tool Argument Normalization**:
+  - Updated `src-tauri/src/ai/tools.rs` so read-only tools normalize common malformed `arguments` (like `[]`, `null`, or JSON strings) instead of erroring silently.
+  - Standardized `list_tasks` and `search_journal` tool results to return `{ status, count, ... }` objects.
+- **Prompt Guidance**:
+  - Updated `src-tauri/src/ai/prompt.rs` to always include short task IDs like `[a1b2c3]` when listing/referencing tasks and to handle “delete” as cancel/complete with clarification.
+- **AI Tab UX**:
+  - Updated `src/js/tabs/ai.js` to render `list_tasks` results directly in the tool card with `[id6]` prefixes so users can refer to tasks unambiguously.
+- **Verification**:
+  - `cargo test -q` (src-tauri)
+  - `node --check src/js/tabs/ai.js`
+
+### AI Task Deletion + Full-ID Context
+
+- **New Tool: `delete_task` (Confirmed Soft-Delete)**:
+  - Added `delete_task` to the AI tool contract in `src-tauri/src/ai/tools.rs` (confirmation required, D-19/D-95).
+  - Implemented execution via existing `tasks::soft_delete` (including subtasks) and emits `TaskDeleted` in `src-tauri/src/db/tasks.rs`.
+- **Better Task Referencing**:
+  - Updated task context injection in `src-tauri/src/ai/prompt.rs` to include both `[id6]` and the full UUID (`id=...`) so the model can reliably call tools without guessing.
+  - Updated prompt guidance to use `delete_task` for delete requests and to resolve by title using `list_tasks` when needed.
+- **Verification**:
+  - `cargo test -q` (src-tauri)
+
+### AI Persona + Memory Debugging (Prompt)
+
+- **Tone & Guidance**:
+  - Replaced the “clinical” persona in `src-tauri/src/ai/prompt.rs` with a warmer, more human thinking-partner style while keeping strict tool/confirmation rules.
+  - Restored D-94 compact task injection format (`[id6] ...`) and clarified in the prompt that `[id6]` is a resolvable ID prefix for tool calls.
+- **Dev Verification Aids**:
+  - Added debug-only console logs in `src-tauri/src/lib.rs` showing history/message counts sent to Ollama (no message content).
+- **Verification**:
+  - `cargo test -q` (src-tauri)
+
+### Task Resolution By Name/Recency (No New Tools)
+
+- **AI Tooling (D-111 aligned)**:
+  - Extended `list_tasks` tool and `TaskListFilters` with `query`, `match_recent`, and `limit` so the AI can resolve tasks by name/keyword/recency without adding an extra tool (`src-tauri/src/ai/tools.rs`, `src-tauri/src/db/tasks.rs`).
+- **Prompt Workflow**:
+  - Added an explicit resolve-first workflow instructing the model to use `list_tasks` before `delete_task` / `complete_task` / `update_task when the user refers to a task vaguely or by name (`src-tauri/src/ai/prompt.rs`).
+- **Docs**:
+  - Rewrote `AgentDocs/aiimprovementplan.md` to reflect the project-aligned approach (7-tool limit; use `list_tasks` for resolution).
+- **Verification**:
+  - `cargo test -q` (src-tauri)
+
+### Backend Task Reference Auto-Resolution
+
+- **AI Action Hardening**:
+  - Updated `src-tauri/src/db/tasks.rs` so `update_task`, `complete_task`, and `delete_task` can resolve task references from full UUIDs, `[id6]` prefixes, or title/keyword phrases before mutating the database.
+  - Improved `search_tasks` in `src-tauri/src/db/tasks.rs` to use case-insensitive fuzzy matching across `title`, `description`, and `notes`, with better ranking for exact and prefix title matches.
+- **Validation Alignment**:
+  - Relaxed mutating tool `id` validation/schema in `src-tauri/src/ai/tools.rs` so non-empty task references are allowed and resolved server-side instead of being rejected up front.
+- **Verification**:
+  - `cargo test -q` (src-tauri)
 
 ## 2026-03-19
 

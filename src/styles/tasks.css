@@ -26,6 +26,28 @@
   display: flex;
   gap: 12px;
   align-items: center;
+  flex-wrap: wrap;
+}
+
+.task-view-switch {
+  display: inline-flex;
+  gap: 6px;
+}
+
+.task-view-switch .btn-ghost.active {
+  background: var(--color-accent);
+  color: #fff;
+  border-color: var(--color-accent);
+}
+
+.task-view-panel {
+  display: none;
+  height: calc(100% - 70px);
+  overflow: hidden;
+}
+
+.task-view-panel.active {
+  display: block;
 }
 
 .task-search-box input {
@@ -54,7 +76,7 @@
   grid-template-columns: repeat(4, 1fr);
   gap: 16px;
   padding: var(--space);
-  height: calc(100% - 70px); /* Adjust for header height */
+  height: 100%;
   overflow: hidden;
   box-sizing: border-box;
 }
@@ -115,6 +137,11 @@
   transition: transform 0.1s, border-color 0.2s;
 }
 
+.task-item.dragging {
+  opacity: 0.45;
+  transform: rotate(1deg);
+}
+
 .task-item:hover {
   border-color: var(--color-accent);
   background: rgba(108, 142, 247, 0.05);
@@ -147,6 +174,44 @@
 
 .task-project::before { content: "#"; }
 .task-due::before { content: "📅 "; }
+
+.tasks-list-view,
+.tasks-calendar-view {
+  height: 100%;
+  overflow-y: auto;
+  padding: var(--space);
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.tasks-list-group,
+.tasks-calendar-day {
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius);
+  overflow: hidden;
+}
+
+.tasks-list-group h3,
+.tasks-calendar-day h3 {
+  margin: 0;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--color-border);
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--color-muted);
+  background: var(--color-surface);
+}
+
+.tasks-list-items,
+.tasks-calendar-items {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+}
 
 /* ── PRIORITY COLORS ──────────────────────────── */
 .priority-urgent { border-left: 4px solid #ff4d4d; }
@@ -272,6 +337,15 @@
   background: var(--color-bg);
   border: 1px solid var(--color-border);
   border-radius: calc(var(--radius) / 2);
+}
+
+.project-management-item {
+  cursor: pointer;
+}
+
+.project-management-item:hover {
+  border-color: var(--color-accent);
+  background: rgba(108, 142, 247, 0.05);
 }
 
 .subtask-item .task-toggle {

@@ -1,7 +1,7 @@
-use std::collections::{HashMap, VecDeque, HashSet};
-use tokio::sync::{Mutex, Notify};
 use crate::ai::AnalysisStatus;
 use crate::AppState;
+use std::collections::{HashMap, HashSet, VecDeque};
+use tokio::sync::{Mutex, Notify};
 
 pub async fn start_analysis_worker(state: std::sync::Arc<AppState>) {
     loop {
@@ -23,11 +23,14 @@ pub async fn start_analysis_worker(state: std::sync::Arc<AppState>) {
                 eprintln!("[AI] Analysis error for {}: {:?}", entry_id, e);
                 let mut status_map = state.ai_state.status.lock().await;
                 status_map.insert(entry_id.clone(), AnalysisStatus::Failed);
-                
-                crate::events::emit(&state.handle, crate::events::AppEvent::JournalAnalysisError {
-                    entry_id: entry_id.clone(),
-                    error: e.to_string(),
-                });
+
+                crate::events::emit(
+                    &state.handle,
+                    crate::events::AppEvent::JournalAnalysisError {
+                        entry_id: entry_id.clone(),
+                        error: e.to_string(),
+                    },
+                );
             }
 
             // 3. Remove from queued_ids
@@ -48,19 +51,25 @@ async fn perform_analysis(state: &AppState, entry_id: &str) -> Result<(), crate:
 
     if let Some(entry) = journal {
         // emit Processing event for frontend UI updates
-        crate::events::emit(&state.handle, crate::events::AppEvent::JournalAnalysisProcessing {
-            entry_id: entry_id.to_string(),
-        });
+        crate::events::emit(
+            &state.handle,
+            crate::events::AppEvent::JournalAnalysisProcessing {
+                entry_id: entry_id.to_string(),
+            },
+        );
 
         // 2. Call Ollama
-        let result = state.ollama.analyze_journal(&entry.content, entry_id.to_string()).await?;
+        let result = state
+            .ollama
+            .analyze_journal(&entry.content, entry_id.to_string())
+            .await?;
 
         // 3. Save to DB
         {
             let conn = state.conn.lock().await;
             crate::db::ai::save_analysis_result(&conn, &result)?;
         }
-        
+
         // 4. Update status
         {
             let mut status_map = state.ai_state.status.lock().await;
@@ -68,12 +77,15 @@ async fn perform_analysis(state: &AppState, entry_id: &str) -> Result<(), crate:
         }
 
         // 5. Notify frontend
-        crate::events::emit(&state.handle, crate::events::AppEvent::JournalAnalysisCompleted {
-            entry_id: entry_id.to_string(),
-            result,
-        });
+        crate::events::emit(
+            &state.handle,
+            crate::events::AppEvent::JournalAnalysisCompleted {
+                entry_id: entry_id.to_string(),
+                result,
+            },
+        );
     }
-    
+
     Ok(())
 }
 
@@ -100,7 +112,7 @@ impl AnalysisState {
 
     pub async fn should_analyze(&self, entry_id: &str, content: &str) -> bool {
         let mut hashes = self.last_hashes.lock().await;
-        
+
         // Prevent memory leak by capping the hash map size
         if hashes.len() > 1000 {
             hashes.clear();
@@ -157,7 +169,8 @@ mod tests {
             let s = state.clone();
             handles.push(tokio::spawn(async move {
                 let mut queue: tokio::sync::MutexGuard<'_, VecDeque<String>> = s.queue.lock().await;
-                let mut ids: tokio::sync::MutexGuard<'_, HashSet<String>> = s.queued_ids.lock().await;
+                let mut ids: tokio::sync::MutexGuard<'_, HashSet<String>> =
+                    s.queued_ids.lock().await;
                 if queue.len() < MAX_QUEUE {
                     queue.push_back(format!("id-{}", i));
                     ids.insert(format!("id-{}", i));

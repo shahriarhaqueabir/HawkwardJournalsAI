@@ -11,10 +11,14 @@ pub enum AppEvent {
         message: String,
     },
     StartupComplete,
-    
+
     // Journal Events
-    JournalAnalysisQueued { entry_id: String },
-    JournalAnalysisProcessing { entry_id: String },
+    JournalAnalysisQueued {
+        entry_id: String,
+    },
+    JournalAnalysisProcessing {
+        entry_id: String,
+    },
     JournalAnalysisCompleted {
         entry_id: String,
         result: crate::ai::AnalysisResult,
@@ -23,16 +27,29 @@ pub enum AppEvent {
         entry_id: String,
         error: String,
     },
-    JournalSaved { entry_id: String },
+    JournalSaved {
+        entry_id: String,
+    },
 
     // Task Events
-    TaskCreated { id: String, title: String },
-    TaskUpdated { id: String },
-    TaskCompleted { id: String },
-    TaskDeleted { id: String },
+    TaskCreated {
+        id: String,
+        title: String,
+    },
+    TaskUpdated {
+        id: String,
+    },
+    TaskCompleted {
+        id: String,
+    },
+    TaskDeleted {
+        id: String,
+    },
 
     // Weekly Review
-    WeeklyReviewGenerated { date: String },
+    WeeklyReviewGenerated {
+        date: String,
+    },
 
     // AI & System
     // -- AI Chat Events
@@ -58,9 +75,21 @@ pub enum AppEvent {
         tool_name: String,
     },
     AiStatus(String),
+    AiProactiveNudge {
+        content: String,
+        trigger: String,
+    },
+    AiReflectionPrompt {
+        content: String,
+        suggested_tags: Vec<String>,
+    },
     // --
-    AiModelMissing { model: String },
-    SystemStatus { message: String },
+    AiModelMissing {
+        model: String,
+    },
+    SystemStatus {
+        message: String,
+    },
     DatabaseError {
         operation: String,
         error: String,
@@ -74,7 +103,6 @@ pub enum AiTokenSource {
     Chat,
     Analysis,
 }
-
 
 pub fn emit(app: &AppHandle, event: AppEvent) {
     app.emit("app_event", event).ok();

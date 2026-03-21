@@ -12,11 +12,11 @@ pub enum AppError {
 impl std::fmt::Display for AppError {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         match self {
-            AppError::Database(e)    => write!(f, "Database error: {}", e),
-            AppError::Io(e)          => write!(f, "IO error: {}", e),
-            AppError::NotFound(e)    => write!(f, "Not found: {}", e),
-            AppError::InvalidInput(e)=> write!(f, "Invalid input: {}", e),
-            AppError::AiError(e)     => write!(f, "AI error: {}", e),
+            AppError::Database(e) => write!(f, "Database error: {}", e),
+            AppError::Io(e) => write!(f, "IO error: {}", e),
+            AppError::NotFound(e) => write!(f, "Not found: {}", e),
+            AppError::InvalidInput(e) => write!(f, "Invalid input: {}", e),
+            AppError::AiError(e) => write!(f, "AI error: {}", e),
         }
     }
 }

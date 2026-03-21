@@ -1,12 +1,12 @@
+use crate::error::AppError;
+use crate::events::{emit, AppEvent};
+use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
-use crate::error::AppError;
-use tokio::sync::{Mutex, oneshot};
 use std::collections::HashMap;
 use std::time::Duration;
-use chrono::NaiveDate;
-use crate::events::{AppEvent, emit};
 use tauri::{AppHandle, Manager};
+use tokio::sync::{oneshot, Mutex};
 
 #[allow(dead_code)]
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -82,8 +82,9 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 "properties": {
                     "id": {
                         "type": "string",
-                        "description": "The unique ID of the task to update",
-                        "minLength": 6
+                        "description": "Task reference: full UUID, short ID prefix like [a1b2c3], or a task title/keyword that can be resolved",
+                        "minLength": 1,
+                        "maxLength": 200
                     },
                     "title": { "type": "string", "maxLength": 100 },
                     "status": { "type": "string", "enum": ["todo", "in_progress", "done", "cancelled"] },
@@ -107,8 +108,26 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 "properties": {
                     "id": {
                         "type": "string",
-                        "description": "The unique ID of the task to complete",
-                        "minLength": 6
+                        "description": "Task reference: full UUID, short ID prefix like [a1b2c3], or a task title/keyword that can be resolved",
+                        "minLength": 1,
+                        "maxLength": 200
+                    }
+                },
+                "required": ["id"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "delete_task".into(),
+            description: "Soft-delete a task (and its subtasks) by ID when the user explicitly asks to delete or remove a task. Requires user confirmation before any database write.".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "Task reference: full UUID, short ID prefix like [a1b2c3], or a task title/keyword that can be resolved",
+                        "minLength": 1,
+                        "maxLength": 200
                     }
                 },
                 "required": ["id"],
@@ -121,6 +140,9 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             parameters: json!({
                 "type": "object",
                 "properties": {
+                    "query": { "type": "string", "description": "Optional title/keyword filter for resolving tasks mentioned by name (case-insensitive substring match)." },
+                    "match_recent": { "type": "boolean", "description": "If true, return the most recently created tasks first (useful for 'that task' / 'the last one')." },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 50, "description": "Optional max results (recommended when resolving by name)." },
                     "statuses": { "type": "array", "items": { "type": "string", "enum": ["todo", "in_progress", "done", "cancelled"] } },
                     "exclude_statuses": { "type": "array", "items": { "type": "string", "enum": ["todo", "in_progress", "done", "cancelled"] } },
                     "priorities": { "type": "array", "items": { "type": "string", "enum": ["low", "medium", "high", "urgent"] } },
@@ -194,35 +216,44 @@ pub async fn execute_tool_call(
     app: &AppHandle,
     tool_state: &AiToolState,
     name: &str,
-    args: Value,
+    mut args: Value,
 ) -> Result<(String, Value), AppError> {
     let call_id = uuid::Uuid::new_v4().to_string();
 
     match name {
         // --- Confirmable Tools ---
-        "create_task" | "update_task" | "complete_task" => {
+        "create_task" | "update_task" | "complete_task" | "delete_task" => {
+            if matches!(name, "create_task" | "update_task") {
+                strip_blank_optional_strings(&mut args, &["due_date"]);
+            }
             if let Err(message) = validate_mutating_tool_args(name, &args) {
-                return Ok((call_id, json!({
-                    "status": "error",
-                    "code": "validation_failed",
-                    "message": message
-                })));
+                return Ok((
+                    call_id,
+                    json!({
+                        "status": "error",
+                        "code": "validation_failed",
+                        "message": message
+                    }),
+                ));
             }
 
             let (tx, rx) = oneshot::channel();
-            
+
             {
                 let mut pending = tool_state.pending_confirmations.lock().await;
                 pending.insert(call_id.clone(), ToolConfirmation { tx });
             }
 
             // Emit pending event for UI
-            emit(app, AppEvent::AiToolPending {
-                call_id: call_id.clone(),
-                name: name.to_string(),
-                args: args.clone(),
-                description: format!("AI wants to {}...", name.replace("_", " ")),
-            });
+            emit(
+                app,
+                AppEvent::AiToolPending {
+                    call_id: call_id.clone(),
+                    name: name.to_string(),
+                    args: args.clone(),
+                    description: format!("AI wants to {}...", name.replace("_", " ")),
+                },
+            );
 
             // Wait for confirmation with 300s timeout (D-95)
             let confirmed = tokio::select! {
@@ -239,83 +270,153 @@ pub async fn execute_tool_call(
             };
 
             if !confirmed {
-                return Ok((call_id, json!({
-                    "status": "cancelled",
-                    "message": "User declined the operation or it timed out after 300 seconds."
-                })));
+                return Ok((
+                    call_id,
+                    json!({
+                        "status": "cancelled",
+                        "message": "User declined the operation or it timed out after 300 seconds."
+                    }),
+                ));
             }
 
             // Execute actual logic
             match crate::db::tasks::execute_ai_tool(app, name, args).await {
                 Ok(res) => Ok((call_id, res)),
-                Err(e) => Ok((call_id, json!({
-                    "status": "error",
-                    "code": "execution_failed",
-                    "message": e.to_string()
-                }))),
+                Err(e) => Ok((
+                    call_id,
+                    json!({
+                        "status": "error",
+                        "code": "execution_failed",
+                        "message": e.to_string()
+                    }),
+                )),
             }
         }
 
         // --- Read-only Tools ---
         "list_tasks" => {
+            args = normalize_readonly_tool_args(name, args).map_err(AppError::InvalidInput)?;
+            strip_blank_optional_strings(
+                &mut args,
+                &["project_id", "category", "due_before", "due_after"],
+            );
             if let Err(message) = validate_list_tasks_args(&args) {
-                return Ok((call_id, json!({
-                    "status": "error",
-                    "code": "validation_failed",
-                    "message": message
-                })));
+                return Ok((
+                    call_id,
+                    json!({
+                        "status": "error",
+                        "code": "validation_failed",
+                        "message": message
+                    }),
+                ));
             }
 
             emit(app, AppEvent::AiStatus("Searching for tasks...".into()));
             let conn_arc = app.state::<crate::AppState>().conn.clone();
             let conn = conn_arc.lock().await;
-            
-            let filters: crate::db::tasks::TaskListFilters = serde_json::from_value(args)
-                .map_err(|e| AppError::InvalidInput(format!("Invalid list_tasks arguments: {}", e)))?;
+
+            let filters: crate::db::tasks::TaskListFilters = match serde_json::from_value(args) {
+                Ok(v) => v,
+                Err(e) => {
+                    return Ok((
+                        call_id,
+                        json!({
+                            "status": "error",
+                            "code": "invalid_arguments",
+                            "message": format!("Invalid list_tasks arguments: {}", e)
+                        }),
+                    ));
+                }
+            };
             let tasks = crate::db::tasks::list_tasks(&conn, filters)?;
-            let compact = tasks.into_iter().map(|task| {
-                json!({
-                    "id": task.id,
-                    "title": task.title,
-                    "status": task.status,
-                    "priority": task.priority,
-                    "due_date": task.due_date,
-                    "project_id": task.project_id,
-                    "energy_level": task.energy_level,
+            let compact = tasks
+                .into_iter()
+                .map(|task| {
+                    json!({
+                        "id": task.id,
+                        "title": task.title,
+                        "status": task.status,
+                        "priority": task.priority,
+                        "due_date": task.due_date,
+                        "project_id": task.project_id,
+                        "energy_level": task.energy_level,
+                    })
                 })
-            }).collect::<Vec<_>>();
-            Ok((call_id, json!(compact)))
+                .collect::<Vec<_>>();
+            Ok((
+                call_id,
+                json!({
+                    "status": "success",
+                    "count": compact.len(),
+                    "tasks": compact
+                }),
+            ))
         }
         "search_journal" => {
+            args = normalize_readonly_tool_args(name, args).map_err(AppError::InvalidInput)?;
+            strip_blank_optional_strings(&mut args, &["date_from", "date_to"]);
             if let Err(message) = validate_search_journal_args(&args) {
-                return Ok((call_id, json!({
-                    "status": "error",
-                    "code": "validation_failed",
-                    "message": message
-                })));
+                return Ok((
+                    call_id,
+                    json!({
+                        "status": "error",
+                        "code": "validation_failed",
+                        "message": message
+                    }),
+                ));
             }
 
-            emit(app, AppEvent::AiStatus("Searching journal entries...".into()));
+            emit(
+                app,
+                AppEvent::AiStatus("Searching journal entries...".into()),
+            );
             let conn_arc = app.state::<crate::AppState>().conn.clone();
             let conn = conn_arc.lock().await;
-            
-            let filters: crate::db::journal::JournalSearchFilters = serde_json::from_value(args)
-                .map_err(|e| AppError::InvalidInput(format!("Invalid search_journal arguments: {}", e)))?;
+
+            let filters: crate::db::journal::JournalSearchFilters =
+                match serde_json::from_value(args) {
+                    Ok(v) => v,
+                    Err(e) => {
+                        return Ok((
+                            call_id,
+                            json!({
+                                "status": "error",
+                                "code": "invalid_arguments",
+                                "message": format!("Invalid search_journal arguments: {}", e)
+                            }),
+                        ));
+                    }
+                };
             let results = crate::db::journal::search_entries(&conn, &filters)?;
-            Ok((call_id, json!(results)))
+            Ok((
+                call_id,
+                json!({
+                    "status": "success",
+                    "count": results.len(),
+                    "results": results
+                }),
+            ))
         }
         "fetch_url" => {
-            let url = args["url"].as_str().ok_or_else(|| AppError::InvalidInput("Missing URL".into()))?;
+            let url = args["url"]
+                .as_str()
+                .ok_or_else(|| AppError::InvalidInput("Missing URL".into()))?;
 
             if let Err(message) = validate_url(url) {
-                return Ok((call_id, json!({
-                    "status": "error",
-                    "code": "invalid_url",
-                    "message": message
-                })));
+                return Ok((
+                    call_id,
+                    json!({
+                        "status": "error",
+                        "code": "invalid_url",
+                        "message": message
+                    }),
+                ));
             }
 
-            emit(app, AppEvent::AiStatus(format!("Fetching {}...", truncate_url(url))));
+            emit(
+                app,
+                AppEvent::AiStatus(format!("Fetching {}...", truncate_url(url))),
+            );
 
             let client = reqwest::Client::builder()
                 .timeout(Duration::from_secs(10))
@@ -326,28 +427,37 @@ pub async fn execute_tool_call(
             match client.get(url).send().await {
                 Ok(response) => {
                     if !response.status().is_success() {
-                        return Ok((call_id, json!({
-                            "status": "error",
-                            "code": "http_error",
-                            "message": format!("Server returned {}", response.status())
-                        })));
+                        return Ok((
+                            call_id,
+                            json!({
+                                "status": "error",
+                                "code": "http_error",
+                                "message": format!("Server returned {}", response.status())
+                            }),
+                        ));
                     }
 
                     match response.text().await {
                         Ok(text) => {
                             let truncated = text.chars().take(5000).collect::<String>();
-                            Ok((call_id, json!({
-                                "status": "success",
-                                "url": url,
-                                "content": truncated,
-                                "truncated": text.chars().count() > 5000
-                            })))
+                            Ok((
+                                call_id,
+                                json!({
+                                    "status": "success",
+                                    "url": url,
+                                    "content": truncated,
+                                    "truncated": text.chars().count() > 5000
+                                }),
+                            ))
                         }
-                        Err(e) => Ok((call_id, json!({
-                            "status": "error",
-                            "code": "read_error",
-                            "message": format!("Could not read response body: {}", e)
-                        }))),
+                        Err(e) => Ok((
+                            call_id,
+                            json!({
+                                "status": "error",
+                                "code": "read_error",
+                                "message": format!("Could not read response body: {}", e)
+                            }),
+                        )),
                     }
                 }
                 Err(e) => {
@@ -359,11 +469,14 @@ pub async fn execute_tool_call(
                         "request_failed"
                     };
 
-                    Ok((call_id, json!({
-                        "status": "error",
-                        "code": code,
-                        "message": format!("Request failed: {}", e)
-                    })))
+                    Ok((
+                        call_id,
+                        json!({
+                            "status": "error",
+                            "code": code,
+                            "message": format!("Request failed: {}", e)
+                        }),
+                    ))
                 }
             }
         }
@@ -371,10 +484,63 @@ pub async fn execute_tool_call(
     }
 }
 
+fn normalize_readonly_tool_args(tool_name: &str, args: Value) -> Result<Value, String> {
+    // Ollama tool calls sometimes emit `arguments` as `[]`, `null`, or even as a JSON string.
+    // For read-only tools, we can safely normalize common malformed shapes.
+    match args {
+        Value::Null => Ok(json!({})),
+        Value::Array(arr) if arr.is_empty() => Ok(json!({})),
+        Value::Array(_) => Err(format!(
+            "{} expects an object argument like {{...filters}}, not an array",
+            tool_name
+        )),
+        Value::String(s) => {
+            let trimmed = s.trim();
+            if trimmed.is_empty() {
+                return Ok(json!({}));
+            }
+
+            if trimmed == "[]" {
+                return Ok(json!({}));
+            }
+
+            if !(trimmed.starts_with('{') || trimmed.starts_with('[')) {
+                return Err(format!(
+                    "{} arguments must be a JSON object (or omitted).",
+                    tool_name
+                ));
+            }
+
+            serde_json::from_str::<Value>(trimmed)
+                .map_err(|e| format!("{} arguments JSON could not be parsed: {}", tool_name, e))
+        }
+        other => Ok(other),
+    }
+}
+
+fn strip_blank_optional_strings(args: &mut Value, keys: &[&str]) {
+    let Some(obj) = args.as_object_mut() else {
+        return;
+    };
+
+    for key in keys {
+        let should_remove = obj
+            .get(*key)
+            .and_then(|v| v.as_str())
+            .is_some_and(|s| s.trim().is_empty());
+
+        if should_remove {
+            obj.remove(*key);
+        }
+    }
+}
+
 fn validate_mutating_tool_args(tool_name: &str, args: &Value) -> Result<(), String> {
     match tool_name {
         "create_task" => {
-            let title = args["title"].as_str().ok_or_else(|| "Missing required field: title".to_string())?;
+            let title = args["title"]
+                .as_str()
+                .ok_or_else(|| "Missing required field: title".to_string())?;
             if title.trim().is_empty() {
                 return Err("Task title cannot be empty".into());
             }
@@ -387,10 +553,10 @@ fn validate_mutating_tool_args(tool_name: &str, args: &Value) -> Result<(), Stri
             Ok(())
         }
         "update_task" => {
-            let id = args["id"].as_str().ok_or_else(|| "Missing required field: id".to_string())?;
-            if id.len() < 6 {
-                return Err("Task ID must be at least 6 characters".into());
-            }
+            let id = args["id"]
+                .as_str()
+                .ok_or_else(|| "Missing required field: id".to_string())?;
+            validate_task_reference_field("id", id)?;
             if args.as_object().map(|obj| obj.len()).unwrap_or_default() <= 1 {
                 return Err("At least one field to update must be provided".into());
             }
@@ -408,10 +574,17 @@ fn validate_mutating_tool_args(tool_name: &str, args: &Value) -> Result<(), Stri
             Ok(())
         }
         "complete_task" => {
-            let id = args["id"].as_str().ok_or_else(|| "Missing required field: id".to_string())?;
-            if id.len() < 6 {
-                return Err("Task ID must be at least 6 characters".into());
-            }
+            let id = args["id"]
+                .as_str()
+                .ok_or_else(|| "Missing required field: id".to_string())?;
+            validate_task_reference_field("id", id)?;
+            Ok(())
+        }
+        "delete_task" => {
+            let id = args["id"]
+                .as_str()
+                .ok_or_else(|| "Missing required field: id".to_string())?;
+            validate_task_reference_field("id", id)?;
             Ok(())
         }
         _ => Ok(()),
@@ -429,7 +602,9 @@ fn validate_list_tasks_args(args: &Value) -> Result<(), String> {
 }
 
 fn validate_search_journal_args(args: &Value) -> Result<(), String> {
-    let query = args["query"].as_str().ok_or_else(|| "Missing required field: query".to_string())?;
+    let query = args["query"]
+        .as_str()
+        .ok_or_else(|| "Missing required field: query".to_string())?;
     let trimmed = query.trim();
     if trimmed.len() < 3 {
         return Err("Search query must be at least 3 characters".into());
@@ -451,6 +626,20 @@ fn validate_iso_date(field_name: &str, value: &str) -> Result<(), String> {
     NaiveDate::parse_from_str(value, "%Y-%m-%d")
         .map(|_| ())
         .map_err(|_| format!("Invalid {} format. Use YYYY-MM-DD", field_name))
+}
+
+fn validate_task_reference_field(field_name: &str, value: &str) -> Result<(), String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return Err(format!("Missing required field: {}", field_name));
+    }
+    if trimmed.len() > 200 {
+        return Err(format!(
+            "Invalid {}: must be 200 characters or fewer",
+            field_name
+        ));
+    }
+    Ok(())
 }
 
 fn validate_url(url: &str) -> Result<(), String> {
@@ -491,7 +680,10 @@ fn validate_url(url: &str) -> Result<(), String> {
         "https://[fe80",
     ];
 
-    if blocked_prefixes.iter().any(|prefix| lower.starts_with(prefix)) {
+    if blocked_prefixes
+        .iter()
+        .any(|prefix| lower.starts_with(prefix))
+    {
         return Err("Local and private-network URLs are not allowed".into());
     }
 
@@ -514,18 +706,24 @@ mod tests {
 
     #[test]
     fn create_task_validation_rejects_blank_title() {
-        let result = validate_mutating_tool_args("create_task", &json!({
-            "title": "   "
-        }));
+        let result = validate_mutating_tool_args(
+            "create_task",
+            &json!({
+                "title": "   "
+            }),
+        );
 
         assert!(result.is_err());
     }
 
     #[test]
     fn update_task_validation_requires_fields_to_change() {
-        let result = validate_mutating_tool_args("update_task", &json!({
-            "id": "abcdef"
-        }));
+        let result = validate_mutating_tool_args(
+            "update_task",
+            &json!({
+                "id": "abcdef"
+            }),
+        );
 
         assert!(result.is_err());
     }
@@ -549,6 +747,39 @@ mod tests {
     }
 
     #[test]
+    fn strip_blank_optional_strings_removes_empty_values() {
+        let mut args = json!({
+            "due_before": "",
+            "due_after": "   ",
+            "category": "work"
+        });
+
+        strip_blank_optional_strings(&mut args, &["due_before", "due_after"]);
+
+        assert!(args.get("due_before").is_none());
+        assert!(args.get("due_after").is_none());
+        assert_eq!(args.get("category").and_then(|v| v.as_str()), Some("work"));
+    }
+
+    #[test]
+    fn task_reference_validation_allows_human_phrases() {
+        let result = validate_mutating_tool_args(
+            "complete_task",
+            &json!({
+                "id": "New Task"
+            }),
+        );
+
+        assert!(result.is_ok());
+    }
+
+    #[test]
+    fn normalize_readonly_tool_args_accepts_empty_array_as_empty_object() {
+        let normalized = normalize_readonly_tool_args("list_tasks", json!([])).unwrap();
+        assert!(normalized.is_object());
+    }
+
+    #[test]
     fn validate_url_allows_public_https() {
         let result = validate_url("https://example.com/article");
 
@@ -564,7 +795,8 @@ mod tests {
 
     #[test]
     fn truncate_url_shortens_long_values() {
-        let url = "https://example.com/this/is/a/very/long/path/that/should/be/truncated/by/the-helper";
+        let url =
+            "https://example.com/this/is/a/very/long/path/that/should/be/truncated/by/the-helper";
         let truncated = truncate_url(url);
 
         assert!(truncated.len() <= 60);

@@ -39,7 +39,8 @@ const MIGRATIONS: &[Migration] = &[
 fn is_begin_transaction_line(line: &str) -> bool {
     let before_comment = line.split_once("--").map_or(line, |(left, _)| left);
     match before_comment.trim().to_ascii_uppercase().as_str() {
-        "BEGIN;" | "BEGIN TRANSACTION;" | "BEGIN DEFERRED;" | "BEGIN IMMEDIATE;" | "BEGIN EXCLUSIVE;" => true,
+        "BEGIN;" | "BEGIN TRANSACTION;" | "BEGIN DEFERRED;" | "BEGIN IMMEDIATE;"
+        | "BEGIN EXCLUSIVE;" => true,
         _ => false,
     }
 }
@@ -51,8 +52,12 @@ fn is_commit_transaction_line(line: &str) -> bool {
 
 fn strip_outer_transaction(sql: &str) -> String {
     let lines: Vec<&str> = sql.lines().collect();
-    let begin_index = lines.iter().position(|line| is_begin_transaction_line(line));
-    let commit_index = lines.iter().rposition(|line| is_commit_transaction_line(line));
+    let begin_index = lines
+        .iter()
+        .position(|line| is_begin_transaction_line(line));
+    let commit_index = lines
+        .iter()
+        .rposition(|line| is_commit_transaction_line(line));
 
     match (begin_index, commit_index) {
         (Some(begin), Some(commit)) if begin < commit => lines
@@ -158,7 +163,9 @@ COMMIT;
         let mut conn = Connection::open_in_memory().unwrap();
         run_pending(&mut conn).unwrap();
         let applied_count: i64 = conn
-            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| row.get(0))
+            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
             .unwrap();
         assert_eq!(applied_count, MIGRATIONS.len() as i64);
     }

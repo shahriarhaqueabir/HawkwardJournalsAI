@@ -8,9 +8,16 @@ export function initTasks() {
     done: document.getElementById("tasks-done"),
     cancelled: document.getElementById("tasks-cancelled")
   };
+  const kanbanView = document.getElementById("tasks-view-kanban");
+  const listView = document.getElementById("tasks-view-list");
+  const calendarView = document.getElementById("tasks-view-calendar");
+  const listViewEl = document.getElementById("tasks-list-view");
+  const calendarViewEl = document.getElementById("tasks-calendar-view");
+  const viewButtons = document.querySelectorAll("[data-task-view]");
   const searchInput = document.getElementById("task-search");
   const newTaskBtn = document.getElementById("btn-new-task");
   const projectFilter = document.getElementById("task-project-filter");
+  const manageProjectsBtn = document.getElementById("btn-manage-projects");
   
   // Detail Panel Elements
   const detailPanel = document.getElementById("task-detail-panel");
@@ -53,9 +60,14 @@ export function initTasks() {
   let currentProjects = [];
   let draggedTaskId = null;
   let suppressClickUntil = 0;
+  let activeView = "kanban";
 
   // Modals
   showProjectModalBtn?.addEventListener("click", () => {
+    resetProjectForm();
+    projectCreateModal.classList.remove("hidden");
+  });
+  manageProjectsBtn?.addEventListener("click", () => {
     resetProjectForm();
     projectCreateModal.classList.remove("hidden");
   });
@@ -130,6 +142,8 @@ export function initTasks() {
       }
 
       renderTasks(tasks);
+      renderListView(tasks);
+      renderCalendarView(tasks);
     } catch (err) {
       console.error("Failed to load tasks:", err);
     }
@@ -188,7 +202,7 @@ export function initTasks() {
     }
 
     projectManagementList.innerHTML = projects.map(project => `
-      <div class="project-management-item">
+      <div class="project-management-item" data-project-edit="${project.id}">
         <div class="project-management-main">
           <div class="project-management-title">${escapeHtml(project.name)}</div>
           <div class="project-management-meta">${escapeHtml(project.status)}${project.goal_date ? ` · ${escapeHtml(project.goal_date)}` : ""}</div>
@@ -334,9 +348,114 @@ export function initTasks() {
         item.classList.remove("dragging");
       });
     });
+  }
 
-    // Column drop listeners (setup once or keep if re-rendered?)
-    // Actually better to setup once in initTasks if possible, but cards are re-rendered.
+  function renderListView(tasks) {
+    if (!listViewEl) return;
+    if (!tasks || tasks.length === 0) {
+      listViewEl.innerHTML = '<div class="list-empty">No tasks</div>';
+      return;
+    }
+
+    const groups = [
+      ["todo", "To Do"],
+      ["in_progress", "In Progress"],
+      ["done", "Done"],
+      ["cancelled", "Cancelled"],
+    ];
+
+    listViewEl.innerHTML = groups.map(([status, label]) => {
+      const items = tasks.filter(task => task.status === status);
+      const rows = items.length
+        ? items.map(renderTaskCard).join("")
+        : '<div class="list-empty">No tasks</div>';
+      return `
+        <section class="tasks-list-group">
+          <h3>${label}</h3>
+          <div class="tasks-list-items">${rows}</div>
+        </section>
+      `;
+    }).join("");
+
+    bindTaskCards(listViewEl);
+  }
+
+  function renderCalendarView(tasks) {
+    if (!calendarViewEl) return;
+
+    const datedTasks = (tasks || [])
+      .filter(task => task.due_date)
+      .sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)));
+
+    if (datedTasks.length === 0) {
+      calendarViewEl.innerHTML = '<div class="list-empty">No tasks with due dates</div>';
+      return;
+    }
+
+    const groups = new Map();
+    datedTasks.forEach((task) => {
+      const key = task.due_date;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(task);
+    });
+
+    calendarViewEl.innerHTML = Array.from(groups.entries()).map(([date, items]) => `
+      <section class="tasks-calendar-day">
+        <h3>${formatCalendarDate(date)}</h3>
+        <div class="tasks-calendar-items">
+          ${items.map(renderTaskCard).join("")}
+        </div>
+      </section>
+    `).join("");
+
+    bindTaskCards(calendarViewEl);
+  }
+
+  function renderTaskCard(task) {
+    const priorityClass = `priority-${task.priority}`;
+    return `
+      <div class="task-item ${priorityClass}" data-id="${task.id}" draggable="false">
+        <input type="checkbox" ${task.status === "done" ? "checked" : ""} class="task-toggle" title="Mark as done" />
+        <div class="task-content">
+          <div class="task-title">${escapeHtml(task.title)}</div>
+          <div class="task-meta">
+            ${task.project ? `<span class="task-project">${escapeHtml(task.project)}</span>` : ""}
+            ${task.due_date ? `<span class="task-due">${escapeHtml(task.due_date)}</span>` : ""}
+          </div>
+        </div>
+      </div>
+    `;
+  }
+
+  function bindTaskCards(root) {
+    root.querySelectorAll(".task-toggle").forEach(cb => {
+      cb.addEventListener("click", (e) => e.stopPropagation());
+      cb.addEventListener("change", async (e) => {
+        const id = e.target.closest(".task-item").dataset.id;
+        const newStatus = e.target.checked ? "done" : "todo";
+        await invoke("task_update_status", { id, status: newStatus });
+        refreshTasks(searchInput.value);
+      });
+    });
+
+    root.querySelectorAll(".task-item").forEach((item) => {
+      item.addEventListener("click", () => openDetail(item.dataset.id));
+    });
+  }
+
+  function setActiveView(nextView) {
+    activeView = nextView;
+    const views = {
+      kanban: kanbanView,
+      list: listView,
+      calendar: calendarView,
+    };
+    Object.entries(views).forEach(([name, panel]) => {
+      panel?.classList.toggle("active", name === nextView);
+    });
+    viewButtons.forEach((button) => {
+      button.classList.toggle("active", button.dataset.taskView === nextView);
+    });
   }
 
   async function loadSubtasks(taskId) {
@@ -436,10 +555,7 @@ export function initTasks() {
       const id = e.dataTransfer.getData("text/plain") || draggedTaskId;
       if (id) {
         const existingTask = document.querySelector(`.task-item[data-id="${id}"]`);
-        const currentStatus = existingTask?.closest(".column-items")?.id === "tasks-in-progress"
-          ? "in_progress"
-          : existingTask?.closest(".column-items")?.id?.replace("tasks-", "") || null;
-
+        const currentStatus = existingTask?.closest(".column-items")?.dataset.status || null;
         if (currentStatus === status) {
           return;
         }
@@ -490,6 +606,12 @@ export function initTasks() {
   // --- ACTIONS ---
   searchInput.addEventListener("input", (e) => {
     refreshTasks(e.target.value);
+  });
+
+  viewButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      setActiveView(button.dataset.taskView || "kanban");
+    });
   });
 
   projectFilter.addEventListener("change", () => {
@@ -590,6 +712,7 @@ export function initTasks() {
 
   // Initial load
   loadProjects().then(() => refreshTasks());
+  setActiveView("kanban");
 
   globalThis.__TASKS_EVENT_HANDLER__ = (payload) => {
     if (["task_created", "task_updated", "task_deleted", "task_completed", "task_restored"].includes(payload.type)) {
@@ -604,5 +727,18 @@ export function initTasks() {
     const div = document.createElement("div");
     div.textContent = text ?? "";
     return div.innerHTML;
+  }
+
+  function formatCalendarDate(dateValue) {
+    const date = new Date(`${dateValue}T12:00:00`);
+    if (Number.isNaN(date.getTime())) {
+      return dateValue;
+    }
+    return date.toLocaleDateString(undefined, {
+      weekday: "short",
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    });
   }
 }

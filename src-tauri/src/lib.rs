@@ -6,17 +6,20 @@ mod events;
 mod logger;
 mod scheduler;
 
-use tauri::{Manager, Listener};
 use chrono::Utc;
 use db::paths::resolve_data_dir;
 use error::AppError;
 use rusqlite::Connection;
 use std::sync::Arc;
+use tauri::{Listener, Manager};
 use tokio::sync::Mutex;
 use uuid::Uuid;
 
 fn ai_tool_confirmed_flag(tool_name: &str, result: &serde_json::Value) -> Option<i32> {
-    let is_mutating = matches!(tool_name, "create_task" | "update_task" | "complete_task");
+    let is_mutating = matches!(
+        tool_name,
+        "create_task" | "update_task" | "complete_task" | "delete_task"
+    );
     if !is_mutating {
         return None;
     }
@@ -85,19 +88,25 @@ async fn save_journal_entry(
         if queue.len() < ai::analysis::MAX_QUEUE && !queued_ids.contains(&entry_id) {
             queue.push_back(entry_id.clone());
             queued_ids.insert(entry_id.clone());
-            
+
             // Wake up the background loop
-            state.ai_state.notify.notify_one(); 
-            
-            crate::events::emit(&state.handle, crate::events::AppEvent::JournalAnalysisQueued { 
-                entry_id: entry_id.clone() 
-            });
+            state.ai_state.notify.notify_one();
+
+            crate::events::emit(
+                &state.handle,
+                crate::events::AppEvent::JournalAnalysisQueued {
+                    entry_id: entry_id.clone(),
+                },
+            );
         }
     }
 
-    crate::events::emit(&state.handle, crate::events::AppEvent::JournalSaved { 
-        entry_id: entry_id.clone() 
-    });
+    crate::events::emit(
+        &state.handle,
+        crate::events::AppEvent::JournalSaved {
+            entry_id: entry_id.clone(),
+        },
+    );
 
     Ok(entry_id)
 }
@@ -107,6 +116,11 @@ async fn get_report_summary(
     state: tauri::State<'_, AppState>,
     days: i32,
 ) -> Result<db::reports::ReportData, AppError> {
+    if !(1..=365).contains(&days) {
+        return Err(AppError::InvalidInput(
+            "days must be between 1 and 365".into(),
+        ));
+    }
     let conn = state.conn.lock().await;
     db::reports::get_report_data(&conn, days)
 }
@@ -159,10 +173,7 @@ async fn journal_list(
 }
 
 #[tauri::command]
-async fn journal_delete(
-    state: tauri::State<'_, AppState>,
-    id: String,
-) -> Result<bool, AppError> {
+async fn journal_delete(state: tauri::State<'_, AppState>, id: String) -> Result<bool, AppError> {
     let conn = state.conn.lock().await;
     db::journal::soft_delete(&conn, &id)
 }
@@ -213,9 +224,7 @@ async fn journal_request_analysis(
     state.ai_state.notify.notify_one();
     crate::events::emit(
         &state.handle,
-        crate::events::AppEvent::JournalAnalysisQueued {
-            entry_id,
-        },
+        crate::events::AppEvent::JournalAnalysisQueued { entry_id },
     );
 
     Ok(())
@@ -237,7 +246,9 @@ async fn task_create(
     if let Some(ref pid) = parent_task_id {
         if let Some(parent) = db::tasks::get_task(&conn, pid)? {
             if parent.parent_task_id.is_some() {
-                return Err(AppError::InvalidInput("Maximum subtask depth (2 levels) reached.".into()));
+                return Err(AppError::InvalidInput(
+                    "Maximum subtask depth (2 levels) reached.".into(),
+                ));
             }
         }
     }
@@ -277,12 +288,15 @@ async fn task_create(
 
     db::tasks::normalize_task_project(&conn, &mut task)?;
     db::tasks::create_task(&conn, &task)?;
-    
+
     // §8A: Return full Task object
-    crate::events::emit(&state.handle, crate::events::AppEvent::TaskCreated { 
-        id: task.id.clone(), 
-        title: task.title.clone() 
-    });
+    crate::events::emit(
+        &state.handle,
+        crate::events::AppEvent::TaskCreated {
+            id: task.id.clone(),
+            title: task.title.clone(),
+        },
+    );
 
     Ok(task)
 }
@@ -302,10 +316,9 @@ async fn task_list(
     } else if actual_filters.exclude_statuses.is_none() && actual_filters.statuses.is_none() {
         actual_filters.exclude_statuses = Some(vec!["done".into(), "cancelled".into()]);
     }
-    
+
     db::tasks::list_tasks(&conn, actual_filters)
 }
-
 
 #[tauri::command]
 async fn task_update_status(
@@ -323,12 +336,15 @@ async fn task_update_status(
                 crate::events::emit(&state.handle, crate::events::AppEvent::TaskUpdated { id });
             }
             Ok(())
-        },
+        }
         Err(e) => {
-            crate::events::emit(&state.handle, crate::events::AppEvent::DatabaseError { 
-                operation: "task_update_status".into(), 
-                error: e.to_string() 
-            });
+            crate::events::emit(
+                &state.handle,
+                crate::events::AppEvent::DatabaseError {
+                    operation: "task_update_status".into(),
+                    error: e.to_string(),
+                },
+            );
             Err(e)
         }
     }
@@ -352,7 +368,12 @@ async fn task_update(
     let mut task = task;
     db::tasks::normalize_task_project(&conn, &mut task)?;
     db::tasks::update_task(&conn, &task)?;
-    crate::events::emit(&state.handle, crate::events::AppEvent::TaskUpdated { id: task.id.clone() });
+    crate::events::emit(
+        &state.handle,
+        crate::events::AppEvent::TaskUpdated {
+            id: task.id.clone(),
+        },
+    );
     Ok(())
 }
 
@@ -366,25 +387,39 @@ async fn task_search(
 }
 
 #[tauri::command]
-async fn task_add_dependency(state: tauri::State<'_, AppState>, blocked_task_id: String, blocking_task_id: String) -> Result<(), AppError> {
+async fn task_add_dependency(
+    state: tauri::State<'_, AppState>,
+    blocked_task_id: String,
+    blocking_task_id: String,
+) -> Result<(), AppError> {
     let conn = state.conn.lock().await;
     db::tasks::task_add_dependency(&conn, &blocked_task_id, &blocking_task_id)
 }
 
 #[tauri::command]
-async fn task_remove_dependency(state: tauri::State<'_, AppState>, blocked_task_id: String, blocking_task_id: String) -> Result<(), AppError> {
+async fn task_remove_dependency(
+    state: tauri::State<'_, AppState>,
+    blocked_task_id: String,
+    blocking_task_id: String,
+) -> Result<(), AppError> {
     let conn = state.conn.lock().await;
     db::tasks::task_remove_dependency(&conn, &blocked_task_id, &blocking_task_id)
 }
 
 #[tauri::command]
-async fn timer_start(state: tauri::State<'_, AppState>, task_id: String) -> Result<String, AppError> {
+async fn timer_start(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+) -> Result<String, AppError> {
     let conn = state.conn.lock().await;
     match db::tasks::timer_start(&conn, &task_id) {
         Ok(log_id) => {
-            crate::events::emit(&state.handle, crate::events::AppEvent::TaskUpdated { id: task_id });
+            crate::events::emit(
+                &state.handle,
+                crate::events::AppEvent::TaskUpdated { id: task_id },
+            );
             Ok(log_id)
-        },
+        }
         Err(e) => Err(e),
     }
 }
@@ -394,39 +429,61 @@ async fn timer_stop(state: tauri::State<'_, AppState>, task_id: String) -> Resul
     let conn = state.conn.lock().await;
     match db::tasks::timer_stop(&conn, &task_id) {
         Ok(_) => {
-            crate::events::emit(&state.handle, crate::events::AppEvent::TaskUpdated { id: task_id });
+            crate::events::emit(
+                &state.handle,
+                crate::events::AppEvent::TaskUpdated { id: task_id },
+            );
             Ok(())
-        },
+        }
         Err(e) => Err(e),
     }
 }
 
 #[tauri::command]
-async fn attachment_add(state: tauri::State<'_, AppState>, task_id: String, source_path: String) -> Result<db::tasks::TaskAttachment, AppError> {
+async fn attachment_add(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+    source_path: String,
+) -> Result<db::tasks::TaskAttachment, AppError> {
     let conn = state.conn.lock().await;
     match db::tasks::attachment_add(&conn, &task_id, &source_path) {
         Ok(attachment) => {
-            crate::events::emit(&state.handle, crate::events::AppEvent::TaskUpdated { id: task_id.clone() });
+            crate::events::emit(
+                &state.handle,
+                crate::events::AppEvent::TaskUpdated {
+                    id: task_id.clone(),
+                },
+            );
             Ok(attachment)
-        },
+        }
         Err(e) => Err(e),
     }
 }
 
 #[tauri::command]
-async fn attachment_list(state: tauri::State<'_, AppState>, task_id: String) -> Result<Vec<db::tasks::TaskAttachment>, AppError> {
+async fn attachment_list(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+) -> Result<Vec<db::tasks::TaskAttachment>, AppError> {
     let conn = state.conn.lock().await;
     db::tasks::attachment_list(&conn, &task_id)
 }
 
 #[tauri::command]
-async fn attachment_remove(state: tauri::State<'_, AppState>, id: String, task_id: String) -> Result<(), AppError> {
+async fn attachment_remove(
+    state: tauri::State<'_, AppState>,
+    id: String,
+    task_id: String,
+) -> Result<(), AppError> {
     let conn = state.conn.lock().await;
     match db::tasks::attachment_remove(&conn, &id) {
         Ok(_) => {
-            crate::events::emit(&state.handle, crate::events::AppEvent::TaskUpdated { id: task_id });
+            crate::events::emit(
+                &state.handle,
+                crate::events::AppEvent::TaskUpdated { id: task_id },
+            );
             Ok(())
-        },
+        }
         Err(e) => Err(e),
     }
 }
@@ -465,7 +522,7 @@ pub fn run() {
         ))
         .setup(move |app| {
             let handle = app.handle().clone();
-            
+
             let app_state = AppState {
                 conn: conn.clone(),
                 data_dir: data_dir.clone(),
@@ -485,14 +542,15 @@ pub fn run() {
             // Unified app_event listener
             app.listen("app_event", move |event: tauri::Event| {
                 // Future event handlers can go here
-                let _ = event; 
+                let _ = event;
             });
 
             // Step 8 (D-109): Check for missed Monday weekly review
             let review_handle = handle.clone();
             tauri::async_runtime::spawn(async move {
                 tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
-                let _ = crate::scheduler::weekly_report::maybe_run_weekly_review(&review_handle).await;
+                let _ =
+                    crate::scheduler::weekly_report::maybe_run_weekly_review(&review_handle).await;
             });
 
             // Step 9: Main application background scheduler worker
@@ -506,7 +564,9 @@ pub fn run() {
                     // 1. Weekly Review (Scheduled time check: Mon >= 08:00)
                     let now = chrono::Local::now();
                     if now.weekday() == chrono::Weekday::Mon && now.hour() >= 8 {
-                        let _ = crate::scheduler::weekly_report::maybe_run_weekly_review(&sched_handle).await;
+                        let _ =
+                            crate::scheduler::weekly_report::maybe_run_weekly_review(&sched_handle)
+                                .await;
                     }
 
                     let c = sched_conn.lock().await;
@@ -553,6 +613,8 @@ pub fn run() {
             attachment_list,
             attachment_remove,
             ai_chat,
+            ai_maybe_emit_proactive_nudge,
+            ai_generate_reflection_prompt,
             ai_conversation_list,
             ai_message_list,
             ai_conversation_delete,
@@ -571,11 +633,21 @@ async fn ai_chat(
     entry_id: Option<String>,
 ) -> Result<String, AppError> {
     let conn = state.conn.lock().await;
-    
+
     // 1. Resolve or Create Conversation
+    let existing_conversation = match conversation_id.as_deref() {
+        Some(id) if !id.is_empty() => db::ai::get_conversation(&conn, id)?,
+        _ => None,
+    };
+    let source_entry_id = entry_id.clone().or_else(|| {
+        existing_conversation
+            .as_ref()
+            .and_then(|conv| conv.source_entry_id.clone())
+    });
+
     let conv_id = match conversation_id {
         Some(id) if !id.is_empty() => id,
-        _ => db::ai::create_conversation(&conn, &source, entry_id.as_deref())?,
+        _ => db::ai::create_conversation(&conn, &source, source_entry_id.as_deref())?,
     };
 
     // 2. Persist User Message
@@ -584,69 +656,107 @@ async fn ai_chat(
         conversation_id: conv_id.clone(),
         role: "user".into(),
         content: message.clone(),
-        tool_name: None, tool_args: None, tool_result: None,
-        confirmed: None, model: None, created_at: "".into(),
+        tool_name: None,
+        tool_args: None,
+        tool_result: None,
+        confirmed: None,
+        model: None,
+        created_at: "".into(),
     };
     db::ai::add_message(&conn, &user_msg)?;
 
     // 3. Gather Context & Build System Prompt (D-56, D-61, D-94)
     let now = chrono::Local::now();
     let today_str = now.format("%Y-%m-%d").to_string();
-    let fourteen_days_later = (now + chrono::Duration::days(14)).format("%Y-%m-%d").to_string();
+    let fourteen_days_later = (now + chrono::Duration::days(14))
+        .format("%Y-%m-%d")
+        .to_string();
 
-    let overdue_tasks = db::tasks::list_tasks(&conn, db::tasks::TaskListFilters {
-        due_before: Some(today_str.clone()),
-        exclude_statuses: Some(vec!["done".to_string(), "cancelled".to_string()]),
-        ..Default::default()
-    })?;
+    let overdue_tasks = db::tasks::list_tasks(
+        &conn,
+        db::tasks::TaskListFilters {
+            due_before: Some(today_str.clone()),
+            exclude_statuses: Some(vec!["done".to_string(), "cancelled".to_string()]),
+            ..Default::default()
+        },
+    )?;
 
-    let today_tasks = db::tasks::list_tasks(&conn, db::tasks::TaskListFilters {
-        due_after: Some(today_str.clone()),
-        due_before: Some(today_str.clone()),
-        exclude_statuses: Some(vec!["done".to_string(), "cancelled".to_string()]),
-        ..Default::default()
-    })?;
+    let today_tasks = db::tasks::list_tasks(
+        &conn,
+        db::tasks::TaskListFilters {
+            due_after: Some(today_str.clone()),
+            due_before: Some(today_str.clone()),
+            exclude_statuses: Some(vec!["done".to_string(), "cancelled".to_string()]),
+            ..Default::default()
+        },
+    )?;
 
-    let upcoming_tasks = db::tasks::list_tasks(&conn, db::tasks::TaskListFilters {
-        due_after: Some(today_str.clone()),
-        due_before: Some(fourteen_days_later),
-        exclude_statuses: Some(vec!["done".to_string(), "cancelled".to_string()]),
-        ..Default::default()
-    })?;
+    let upcoming_tasks = db::tasks::list_tasks(
+        &conn,
+        db::tasks::TaskListFilters {
+            due_after: Some(today_str.clone()),
+            due_before: Some(fourteen_days_later),
+            exclude_statuses: Some(vec!["done".to_string(), "cancelled".to_string()]),
+            ..Default::default()
+        },
+    )?;
+    let memory_context = ai::memory::build_prompt_memory(&conn, source_entry_id.as_deref())?;
 
     let prompt_input = ai::prompt::PromptInput {
         mode: ai::prompt::ChatMode::Chat, // Default for AI Tab
         overdue_tasks,
         today_tasks,
         upcoming_tasks,
-        related_journal: vec![], // TODO: Injected via FTS5 later
-        current_entry: None,
+        semantic_memory: memory_context.semantic_memory,
+        recent_patterns: memory_context.recent_patterns,
+        related_journal: memory_context.related_journal,
+        current_entry: memory_context.current_entry,
     };
 
     let system_prompt = ai::prompt::build_system_prompt(&prompt_input);
 
     // 4. Fetch History (including this user message)
     let history = db::ai::get_messages(&conn, &conv_id)?;
-    let mut chat_history: Vec<ai::client::ChatMessage> = history.into_iter().map(|m| {
-        ai::client::ChatMessage {
-            role: m.role,
-            content: m.content,
-            // D-94: never replay historical tool calls back into the next model turn
-            tool_calls: None,
-        }
-    }).collect();
+    #[cfg(debug_assertions)]
+    println!(
+        "[AI] Loaded {} messages from history for conversation {}",
+        history.len(),
+        conv_id
+    );
+    let mut chat_history: Vec<ai::client::ChatMessage> = history
+        .into_iter()
+        .map(|m| {
+            ai::client::ChatMessage {
+                role: m.role,
+                content: m.content,
+                // D-94: never replay historical tool calls back into the next model turn
+                tool_calls: None,
+            }
+        })
+        .collect();
+    #[cfg(debug_assertions)]
+    println!(
+        "[AI] Sending {} messages to Ollama (including system)",
+        chat_history.len() + 1
+    );
 
     // Prepend System Prompt
-    chat_history.insert(0, ai::client::ChatMessage {
-        role: "system".into(),
-        content: system_prompt,
-        tool_calls: None,
-    });
+    chat_history.insert(
+        0,
+        ai::client::ChatMessage {
+            role: "system".into(),
+            content: system_prompt,
+            tool_calls: None,
+        },
+    );
 
     // 5. Call Ollama Chat Stream
     let tools_json = Some(ai::tools::get_tools_for_ollama());
-    crate::events::emit(&state.handle, crate::events::AppEvent::AiStatus("Thinking...".into()));
-    
+    crate::events::emit(
+        &state.handle,
+        crate::events::AppEvent::AiStatus("Thinking...".into()),
+    );
+
     let handle = state.handle.clone();
     let ollama = state.ollama.clone();
     let tool_state = state.ai_tool_state.clone();
@@ -663,8 +773,11 @@ async fn ai_chat(
             turns_remaining -= 1;
             let mut full_assistant_content = String::new();
             let mut tool_invoked = false;
-            
-            match ollama.chat_stream(current_history.clone(), tools_for_this_turn.clone()).await {
+
+            match ollama
+                .chat_stream(current_history.clone(), tools_for_this_turn.clone())
+                .await
+            {
                 Ok(mut stream) => {
                     while let Some(part_res) = stream.next().await {
                         match part_res {
@@ -672,18 +785,21 @@ async fn ai_chat(
                                 if let Some(msg) = part.message {
                                     if let Some(tool_calls) = msg.tool_calls {
                                         tool_invoked = true;
-                                        
+
                                         // 1. Persist assistant message with tool calls
                                         let assistant_msg = db::ai::AiMessage {
                                             id: Uuid::new_v4().to_string(),
                                             conversation_id: conv_id_clone.clone(),
                                             role: "assistant".into(),
                                             content: full_assistant_content.clone(),
-                                            tool_name: None, 
-                                            tool_args: Some(serde_json::to_string(&tool_calls).unwrap_or_default()), 
+                                            tool_name: None,
+                                            tool_args: Some(
+                                                serde_json::to_string(&tool_calls)
+                                                    .unwrap_or_default(),
+                                            ),
                                             tool_result: None,
-                                            confirmed: None, 
-                                            model: Some("llama3.2".into()), 
+                                            confirmed: None,
+                                            model: Some("llama3.2".into()),
                                             created_at: "".into(),
                                         };
                                         {
@@ -702,46 +818,67 @@ async fn ai_chat(
                                         for call in &tool_calls {
                                             let name = &call.function.name;
                                             let args = call.function.arguments.clone();
-                                            
-                                            match ai::tools::execute_tool_call(&handle, &tool_state, name, args.clone()).await {
+
+                                            match ai::tools::execute_tool_call(
+                                                &handle,
+                                                &tool_state,
+                                                name,
+                                                args.clone(),
+                                            )
+                                            .await
+                                            {
                                                 Ok((call_id, result)) => {
-                                                    let confirmed_flag = ai_tool_confirmed_flag(name, &result);
-                                                    crate::events::emit(&handle, crate::events::AppEvent::AiToolResult {
-                                                        call_id,
-                                                        name: name.to_string(),
-                                                        result: result.clone(),
-                                                        confirmed: confirmed_flag.unwrap_or(1) == 1,
-                                                    });
-                                                    
+                                                    let confirmed_flag =
+                                                        ai_tool_confirmed_flag(name, &result);
+                                                    crate::events::emit(
+                                                        &handle,
+                                                        crate::events::AppEvent::AiToolResult {
+                                                            call_id,
+                                                            name: name.to_string(),
+                                                            result: result.clone(),
+                                                            confirmed: confirmed_flag.unwrap_or(1)
+                                                                == 1,
+                                                        },
+                                                    );
+
                                                     let tool_msg = db::ai::AiMessage {
                                                         id: Uuid::new_v4().to_string(),
                                                         conversation_id: conv_id_clone.clone(),
                                                         role: "tool".into(),
-                                                        content: serde_json::to_string(&result).unwrap_or_default(),
+                                                        content: serde_json::to_string(&result)
+                                                            .unwrap_or_default(),
                                                         tool_name: Some(name.to_string()),
                                                         tool_args: None,
-                                                        tool_result: Some(serde_json::to_string(&result).unwrap_or_default()),
+                                                        tool_result: Some(
+                                                            serde_json::to_string(&result)
+                                                                .unwrap_or_default(),
+                                                        ),
                                                         confirmed: confirmed_flag,
-                                                        model: None, created_at: "".into(),
+                                                        model: None,
+                                                        created_at: "".into(),
                                                     };
                                                     {
                                                         let conn = conn_arc.lock().await;
-                                                        let _ = db::ai::add_message(&conn, &tool_msg);
+                                                        let _ =
+                                                            db::ai::add_message(&conn, &tool_msg);
                                                     }
 
                                                     // Push to context for narration
                                                     current_history.push(ai::client::ChatMessage {
                                                         role: "tool".into(),
-                                                        content: serde_json::to_string(&result).unwrap_or_default(),
+                                                        content: serde_json::to_string(&result)
+                                                            .unwrap_or_default(),
                                                         tool_calls: None,
                                                     });
                                                 }
                                                 Err(e) => {
                                                     eprintln!("[AI] Tool failed: {:?}", e);
-                                                    let res = serde_json::json!({"error": e.to_string()});
+                                                    let res =
+                                                        serde_json::json!({"error": e.to_string()});
                                                     current_history.push(ai::client::ChatMessage {
                                                         role: "tool".into(),
-                                                        content: serde_json::to_string(&res).unwrap_or_default(),
+                                                        content: serde_json::to_string(&res)
+                                                            .unwrap_or_default(),
                                                         tool_calls: None,
                                                     });
                                                 }
@@ -749,16 +886,20 @@ async fn ai_chat(
                                         }
                                     } else {
                                         full_assistant_content.push_str(&msg.content);
-                                        crate::events::emit(&handle, crate::events::AppEvent::AiToken {
-                                            token: msg.content.clone(),
-                                            done: part.done && turns_remaining == 0,
-                                            source: crate::events::AiTokenSource::Chat,
-                                        });
+                                        crate::events::emit(
+                                            &handle,
+                                            crate::events::AppEvent::AiToken {
+                                                token: msg.content.clone(),
+                                                done: part.done && turns_remaining == 0,
+                                                source: crate::events::AiTokenSource::Chat,
+                                            },
+                                        );
                                     }
                                 }
                                 if part.done && !tool_invoked {
                                     // Fallback Check
-                                    let fallback_calls = ai::fallback::extract_tool_calls(&full_assistant_content);
+                                    let fallback_calls =
+                                        ai::fallback::extract_tool_calls(&full_assistant_content);
                                     if !fallback_calls.is_empty() {
                                         tool_invoked = true;
                                         for call in fallback_calls {
@@ -772,28 +913,67 @@ async fn ai_chat(
                                                 conversation_id: conv_id_clone.clone(),
                                                 role: "assistant".into(),
                                                 content: full_assistant_content.clone(),
-                                                tool_name: None, 
+                                                tool_name: None,
                                                 tool_args: Some(serde_json::to_string(&serde_json::json!([{"function": {"name": name, "arguments": args}}])).unwrap_or_default()), 
                                                 tool_result: None, confirmed: None, model: Some("llama3.2".into()), created_at: "".into(),
                                             };
-                                            { let conn = conn_arc.lock().await; let _ = db::ai::add_message(&conn, &assistant_msg); }
-                                            current_history.push(ai::client::ChatMessage { role: "assistant".into(), content: full_assistant_content.clone(), tool_calls: None });
+                                            {
+                                                let conn = conn_arc.lock().await;
+                                                let _ = db::ai::add_message(&conn, &assistant_msg);
+                                            }
+                                            current_history.push(ai::client::ChatMessage {
+                                                role: "assistant".into(),
+                                                content: full_assistant_content.clone(),
+                                                tool_calls: None,
+                                            });
 
-                                            match ai::tools::execute_tool_call(&handle, &tool_state, &name, args.clone()).await {
+                                            match ai::tools::execute_tool_call(
+                                                &handle,
+                                                &tool_state,
+                                                &name,
+                                                args.clone(),
+                                            )
+                                            .await
+                                            {
                                                 Ok((call_id, result)) => {
-                                                    let confirmed_flag = ai_tool_confirmed_flag(&name, &result);
-                                                    crate::events::emit(&handle, crate::events::AppEvent::AiToolResult {
-                                                        call_id,
-                                                        name: name.clone(),
-                                                        result: result.clone(),
-                                                        confirmed: confirmed_flag.unwrap_or(1) == 1,
-                                                    });
+                                                    let confirmed_flag =
+                                                        ai_tool_confirmed_flag(&name, &result);
+                                                    crate::events::emit(
+                                                        &handle,
+                                                        crate::events::AppEvent::AiToolResult {
+                                                            call_id,
+                                                            name: name.clone(),
+                                                            result: result.clone(),
+                                                            confirmed: confirmed_flag.unwrap_or(1)
+                                                                == 1,
+                                                        },
+                                                    );
                                                     let t_msg = db::ai::AiMessage {
-                                                        id: Uuid::new_v4().to_string(), conversation_id: conv_id_clone.clone(), role: "tool".into(), content: serde_json::to_string(&result).unwrap_or_default(),
-                                                        tool_name: Some(name.clone()), tool_args: None, tool_result: Some(serde_json::to_string(&result).unwrap_or_default()), confirmed: confirmed_flag, model: None, created_at: "".into(),
+                                                        id: Uuid::new_v4().to_string(),
+                                                        conversation_id: conv_id_clone.clone(),
+                                                        role: "tool".into(),
+                                                        content: serde_json::to_string(&result)
+                                                            .unwrap_or_default(),
+                                                        tool_name: Some(name.clone()),
+                                                        tool_args: None,
+                                                        tool_result: Some(
+                                                            serde_json::to_string(&result)
+                                                                .unwrap_or_default(),
+                                                        ),
+                                                        confirmed: confirmed_flag,
+                                                        model: None,
+                                                        created_at: "".into(),
                                                     };
-                                                    { let conn = conn_arc.lock().await; let _ = db::ai::add_message(&conn, &t_msg); }
-                                                    current_history.push(ai::client::ChatMessage { role: "tool".into(), content: serde_json::to_string(&result).unwrap_or_default(), tool_calls: None });
+                                                    {
+                                                        let conn = conn_arc.lock().await;
+                                                        let _ = db::ai::add_message(&conn, &t_msg);
+                                                    }
+                                                    current_history.push(ai::client::ChatMessage {
+                                                        role: "tool".into(),
+                                                        content: serde_json::to_string(&result)
+                                                            .unwrap_or_default(),
+                                                        tool_calls: None,
+                                                    });
                                                 }
                                                 Err(_) => {}
                                             }
@@ -805,8 +985,12 @@ async fn ai_chat(
                                             conversation_id: conv_id_clone.clone(),
                                             role: "assistant".into(),
                                             content: full_assistant_content.clone(),
-                                            tool_name: None, tool_args: None, tool_result: None,
-                                            confirmed: None, model: Some("llama3.2".into()), created_at: "".into(),
+                                            tool_name: None,
+                                            tool_args: None,
+                                            tool_result: None,
+                                            confirmed: None,
+                                            model: Some("llama3.2".into()),
+                                            created_at: "".into(),
                                         };
                                         let conn = conn_arc.lock().await;
                                         let _ = db::ai::add_message(&conn, &assistant_msg);
@@ -819,18 +1003,27 @@ async fn ai_chat(
                                     }
                                 }
                             }
-                            Err(e) => { eprintln!("[AI] Stream error: {:?}", e); break; }
+                            Err(e) => {
+                                eprintln!("[AI] Stream error: {:?}", e);
+                                break;
+                            }
                         }
                     }
                 }
-                Err(e) => { eprintln!("[AI] ollama.chat_stream error: {:?}", e); break; }
+                Err(e) => {
+                    eprintln!("[AI] ollama.chat_stream error: {:?}", e);
+                    break;
+                }
             }
 
             if tool_invoked && turns_remaining > 0 {
                 // We used a tool! Turn 2 will be narration.
-                crate::events::emit(&handle, crate::events::AppEvent::AiStatus("Interpreting results...".into()));
+                crate::events::emit(
+                    &handle,
+                    crate::events::AppEvent::AiStatus("Interpreting results...".into()),
+                );
                 tools_for_this_turn = None; // Disable tools for narration turn
-                
+
                 // Option B: Map "Tool" to "User" to prevent 400 Bad Request when tools is None
                 for msg in current_history.iter_mut() {
                     if msg.role == "tool" {
@@ -857,25 +1050,129 @@ async fn ai_chat(
 }
 
 #[tauri::command]
-async fn ai_conversation_list(state: tauri::State<'_, AppState>, source: Option<String>) -> Result<Vec<db::ai::AiConversation>, AppError> {
+async fn ai_maybe_emit_proactive_nudge(
+    state: tauri::State<'_, AppState>,
+    trigger: String,
+) -> Result<bool, AppError> {
+    let trigger = ai::companion::ProactiveTrigger::from_str(&trigger)?;
+    let client = state.ollama.clone();
+    let handle = state.handle.clone();
+
+    let (memory, recent_nudges, decision) = {
+        let conn = state.conn.lock().await;
+        let decision = ai::companion::decide_proactive_nudge(&conn, trigger)?;
+        let Some(decision) = decision else {
+            return Ok(false);
+        };
+        let memory = ai::memory::build_prompt_memory(&conn, None)?;
+        let recent_nudges = ai::companion::load_recent_nudges(&conn)?;
+        (memory, recent_nudges, decision)
+    };
+
+    let generated =
+        ai::companion::generate_proactive_nudge(&client, memory, &recent_nudges, &decision).await?;
+    let Some(content) = generated else {
+        return Ok(false);
+    };
+
+    {
+        let conn = state.conn.lock().await;
+        ai::companion::save_nudge(&conn, &content)?;
+    }
+
+    crate::events::emit(
+        &handle,
+        crate::events::AppEvent::AiProactiveNudge {
+            content,
+            trigger: decision.trigger.as_str().to_string(),
+        },
+    );
+
+    Ok(true)
+}
+
+#[tauri::command]
+async fn ai_generate_reflection_prompt(
+    state: tauri::State<'_, AppState>,
+    title: Option<String>,
+    body_so_far: Option<String>,
+    try_another: Option<bool>,
+) -> Result<Option<ai::companion::ReflectionPromptResponse>, AppError> {
+    let client = state.ollama.clone();
+    let handle = state.handle.clone();
+    let try_another = try_another.unwrap_or(false);
+
+    let (memory, recent_prompts, draft_context) = {
+        let conn = state.conn.lock().await;
+        let memory = ai::memory::build_prompt_memory(&conn, None)?;
+        let recent_prompts = ai::companion::load_recent_reflection_prompts(&conn)?;
+        let draft_context =
+            ai::companion::format_draft_context(title.as_deref(), body_so_far.as_deref());
+        (memory, recent_prompts, draft_context)
+    };
+
+    let generated = ai::companion::generate_reflection_prompt(
+        &client,
+        memory,
+        draft_context,
+        &recent_prompts,
+        try_another,
+    )
+    .await?;
+
+    let Some(response) = generated else {
+        return Ok(None);
+    };
+
+    {
+        let conn = state.conn.lock().await;
+        ai::companion::save_reflection_prompt(&conn, &response.content)?;
+    }
+
+    crate::events::emit(
+        &handle,
+        crate::events::AppEvent::AiReflectionPrompt {
+            content: response.content.clone(),
+            suggested_tags: response.suggested_tags.clone(),
+        },
+    );
+
+    Ok(Some(response))
+}
+
+#[tauri::command]
+async fn ai_conversation_list(
+    state: tauri::State<'_, AppState>,
+    source: Option<String>,
+) -> Result<Vec<db::ai::AiConversation>, AppError> {
     let conn = state.conn.lock().await;
     db::ai::list_conversations(&conn, source.as_deref())
 }
 
 #[tauri::command]
-async fn ai_message_list(state: tauri::State<'_, AppState>, conversation_id: String) -> Result<Vec<db::ai::AiMessage>, AppError> {
+async fn ai_message_list(
+    state: tauri::State<'_, AppState>,
+    conversation_id: String,
+) -> Result<Vec<db::ai::AiMessage>, AppError> {
     let conn = state.conn.lock().await;
     db::ai::get_messages(&conn, &conversation_id)
 }
 
 #[tauri::command]
-async fn ai_conversation_delete(state: tauri::State<'_, AppState>, id: String) -> Result<bool, AppError> {
+async fn ai_conversation_delete(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<bool, AppError> {
     let conn = state.conn.lock().await;
     db::ai::soft_delete_conversation(&conn, &id)
 }
 
 #[tauri::command]
-async fn ai_confirm_tool(state: tauri::State<'_, AppState>, call_id: String, confirmed: bool) -> Result<(), AppError> {
+async fn ai_confirm_tool(
+    state: tauri::State<'_, AppState>,
+    call_id: String,
+    confirmed: bool,
+) -> Result<(), AppError> {
     let mut pending = state.ai_tool_state.pending_confirmations.lock().await;
     if let Some(conf) = pending.remove(&call_id) {
         let _ = conf.tx.send(confirmed);
@@ -918,30 +1215,27 @@ async fn project_update(
 }
 
 #[tauri::command]
-async fn project_delete(
-    state: tauri::State<'_, AppState>,
-    id: String,
-) -> Result<bool, AppError> {
+async fn project_delete(state: tauri::State<'_, AppState>, id: String) -> Result<bool, AppError> {
     let conn = state.conn.lock().await;
     db::projects::soft_delete_project(&conn, &id, &Utc::now().to_rfc3339())
 }
 
 #[tauri::command]
-async fn task_delete(
-    state: tauri::State<'_, AppState>,
-    id: String,
-) -> Result<bool, AppError> {
+async fn task_delete(state: tauri::State<'_, AppState>, id: String) -> Result<bool, AppError> {
     let conn = state.conn.lock().await;
     match db::tasks::soft_delete(&conn, &id) {
         Ok(res) => {
             crate::events::emit(&state.handle, crate::events::AppEvent::TaskDeleted { id });
             Ok(res)
-        },
+        }
         Err(e) => {
-            crate::events::emit(&state.handle, crate::events::AppEvent::DatabaseError { 
-                operation: "task_delete".into(), 
-                error: e.to_string() 
-            });
+            crate::events::emit(
+                &state.handle,
+                crate::events::AppEvent::DatabaseError {
+                    operation: "task_delete".into(),
+                    error: e.to_string(),
+                },
+            );
             Err(e)
         }
     }

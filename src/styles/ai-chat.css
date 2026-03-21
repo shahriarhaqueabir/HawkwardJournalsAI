@@ -113,6 +113,57 @@
     line-height: 1.6;
 }
 
+.ai-companion-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px 16px 0;
+}
+
+.companion-card {
+    background:
+        linear-gradient(135deg, rgba(205, 122, 37, 0.16), rgba(232, 206, 162, 0.07)),
+        var(--color-surface);
+    border: 1px solid rgba(205, 122, 37, 0.28);
+    border-radius: 18px;
+    padding: 14px 14px 12px;
+    box-shadow: 0 10px 30px rgba(0, 0, 0, 0.12);
+}
+
+.companion-card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 8px;
+}
+
+.companion-card-title {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--color-muted);
+    font-weight: 700;
+}
+
+.companion-card-body {
+    font-size: 14px;
+    line-height: 1.55;
+    color: var(--color-text);
+}
+
+.companion-card-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.companion-card .btn-ghost,
+.companion-card .btn-primary,
+.companion-card .btn-secondary {
+    min-height: 34px;
+}
+
 /* ── TOOL CARD ────────────────────────────────── */
 .tool-card {
     background: var(--color-surface);

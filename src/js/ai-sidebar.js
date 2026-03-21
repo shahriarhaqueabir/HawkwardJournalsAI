@@ -1,10 +1,14 @@
 import { invoke } from "./ipc.js";
 
 export function initAiSidebar() {
+  const companionEl = document.getElementById("ai-sidebar-companion");
   const messagesEl = document.querySelector("#right-sidebar .ai-chat-messages");
   const currentEntryId = document.getElementById("current-entry-id");
   const input = document.getElementById("ai-chat-input");
   const sendBtn = document.getElementById("btn-ai-sidebar-send");
+
+  let sidebarConversationId = null;
+  let lastEntryIdForConversation = null;
 
   if (!messagesEl) return;
 
@@ -39,6 +43,14 @@ export function initAiSidebar() {
         if (currentEntryId.value === payload.entry_id) {
           showErrorStatus(payload.error);
         }
+        break;
+
+      case "ai_proactive_nudge":
+        renderProactiveNudge(payload.content, payload.trigger);
+        break;
+
+      case "ai_reflection_prompt":
+        renderReflectionPrompt(payload.content, payload.suggested_tags || []);
         break;
 
       case "ai_model_missing":
@@ -174,11 +186,109 @@ export function initAiSidebar() {
     messagesEl.scrollTop = messagesEl.scrollHeight;
   }
 
+  function renderProactiveNudge(content, trigger) {
+    if (!companionEl || !content) return;
+
+    const label = trigger === "empty_entry" ? "Companion Nudge" : "Check-In";
+    const existingReflection = companionEl.querySelector('[data-card="reflection-prompt"]');
+    const reflectionHtml = existingReflection ? existingReflection.outerHTML : "";
+    companionEl.innerHTML = `
+      <div class="companion-card" data-card="proactive-nudge">
+        <div class="companion-card-header">
+          <div class="companion-card-title">${label}</div>
+          <button class="btn-ghost btn-sm" data-dismiss-card="proactive-nudge" type="button">Dismiss</button>
+        </div>
+        <div class="companion-card-body">${escapeHtml(content)}</div>
+      </div>
+      ${reflectionHtml}
+    `;
+    bindCardDismiss();
+    bindTryAnother();
+  }
+
+  function renderReflectionPrompt(content) {
+    if (!companionEl || !content) return;
+
+    const existingNudge = companionEl.querySelector('[data-card="proactive-nudge"]');
+    const nudgeHtml = existingNudge ? existingNudge.outerHTML : "";
+    companionEl.innerHTML = `
+      ${nudgeHtml}
+      <div class="companion-card" data-card="reflection-prompt">
+        <div class="companion-card-header">
+          <div class="companion-card-title">Reflection Prompt</div>
+          <button class="btn-ghost btn-sm" data-dismiss-card="reflection-prompt" type="button">Dismiss</button>
+        </div>
+        <div class="companion-card-body">${escapeHtml(content)}</div>
+        <div class="companion-card-actions">
+          <button class="btn-primary btn-sm" id="btn-reflection-try-another" type="button">Try Another</button>
+        </div>
+      </div>
+    `;
+
+    bindCardDismiss();
+    bindTryAnother();
+  }
+
+  function bindTryAnother() {
+    companionEl?.querySelector("#btn-reflection-try-another")?.addEventListener("click", async () => {
+      await requestReflectionPrompt({ tryAnother: true });
+    });
+  }
+
+  function bindCardDismiss() {
+    companionEl?.querySelectorAll("[data-dismiss-card]").forEach((button) => {
+      if (button.dataset.listened) return;
+      button.dataset.listened = "true";
+      button.addEventListener("click", () => {
+        const card = companionEl.querySelector(`[data-card="${button.dataset.dismissCard}"]`);
+        card?.remove();
+      });
+    });
+  }
+
+  async function requestProactiveNudge(trigger) {
+    try {
+      await invoke("ai_maybe_emit_proactive_nudge", { trigger }, { silent: true });
+    } catch (err) {
+      console.warn("Proactive nudge request failed:", err);
+    }
+  }
+
+  async function requestReflectionPrompt({ tryAnother = false } = {}) {
+    const title = document.getElementById("journal-title")?.value || "";
+    const bodySoFar = document.getElementById("journal-editor")?.value || "";
+
+    try {
+      const response = await invoke(
+        "ai_generate_reflection_prompt",
+        {
+          title,
+          bodySoFar,
+          tryAnother,
+        },
+        { silent: true }
+      );
+
+      if (response?.content) {
+        renderReflectionPrompt(response.content, response.suggested_tags || []);
+      }
+    } catch (err) {
+      console.warn("Reflection prompt request failed:", err);
+    }
+  }
+
+  globalThis.requestSidebarProactiveNudge = requestProactiveNudge;
+  globalThis.requestSidebarReflectionPrompt = requestReflectionPrompt;
+
   async function sendSidebarMessage() {
     const text = input?.value?.trim();
     if (!text) return;
 
     const entryId = currentEntryId?.value || null;
+    if (entryId !== lastEntryIdForConversation) {
+      sidebarConversationId = null;
+      lastEntryIdForConversation = entryId;
+    }
     messagesEl.insertAdjacentHTML(
       "beforeend",
       `<div class="message-row user"><div class="message-bubble user-bubble"></div></div>`
@@ -189,8 +299,8 @@ export function initAiSidebar() {
     input.value = "";
 
     try {
-      await invoke("ai_chat", {
-        conversationId: null,
+      sidebarConversationId = await invoke("ai_chat", {
+        conversationId: sidebarConversationId,
         message: text,
         source: "sidebar",
         entryId,
@@ -207,4 +317,6 @@ export function initAiSidebar() {
       sendSidebarMessage();
     }
   });
+
+  requestProactiveNudge("app_open");
 }

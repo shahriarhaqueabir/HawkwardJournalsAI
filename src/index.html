@@ -74,6 +74,11 @@
           <div class="header-main">
             <h2>Active Tasks</h2>
             <div class="task-controls">
+              <div class="task-view-switch" role="tablist" aria-label="Task View">
+                <button id="btn-task-view-kanban" class="btn-ghost btn-sm active" data-task-view="kanban" type="button">Kanban</button>
+                <button id="btn-task-view-list" class="btn-ghost btn-sm" data-task-view="list" type="button">List</button>
+                <button id="btn-task-view-calendar" class="btn-ghost btn-sm" data-task-view="calendar" type="button">Calendar</button>
+              </div>
               <div class="task-search-box">
                 <input type="text" id="task-search" placeholder="Search tasks..." />
               </div>
@@ -82,6 +87,7 @@
                   <option value="all">All Projects</option>
                   <option value="inbox">Inbox</option>
                 </select>
+                <button id="btn-manage-projects" class="btn-ghost btn-sm" title="Manage Projects" type="button">Manage</button>
                 <button id="btn-show-new-project" class="btn-ghost btn-sm" title="Create New Project">＋</button>
               </div>
             </div>
@@ -90,30 +96,42 @@
             <button id="btn-new-task" class="btn-primary">+ Add Task</button>
           </div>
         </header>
-        <div class="tasks-kanban">
-          <div class="kanban-column" data-status="todo">
-            <header>To Do</header>
-            <div id="tasks-todo" class="column-items">
-              <div class="list-empty">No tasks</div>
+        <div id="tasks-view-kanban" class="task-view-panel active">
+          <div class="tasks-kanban">
+            <div class="kanban-column" data-status="todo">
+              <header>To Do</header>
+              <div id="tasks-todo" class="column-items" data-status="todo">
+                <div class="list-empty">No tasks</div>
+              </div>
+            </div>
+            <div class="kanban-column" data-status="in_progress">
+              <header>In Progress</header>
+              <div id="tasks-in-progress" class="column-items" data-status="in_progress">
+                <div class="list-empty">No tasks</div>
+              </div>
+            </div>
+            <div class="kanban-column" data-status="done">
+              <header>Done</header>
+              <div id="tasks-done" class="column-items" data-status="done">
+                <div class="list-empty">No tasks</div>
+              </div>
+            </div>
+            <div class="kanban-column" data-status="cancelled">
+              <header>Cancelled</header>
+              <div id="tasks-cancelled" class="column-items" data-status="cancelled">
+                <div class="list-empty">No tasks</div>
+              </div>
             </div>
           </div>
-          <div class="kanban-column" data-status="in_progress">
-            <header>In Progress</header>
-            <div id="tasks-in-progress" class="column-items">
-              <div class="list-empty">No tasks</div>
-            </div>
+        </div>
+        <div id="tasks-view-list" class="task-view-panel">
+          <div id="tasks-list-view" class="tasks-list-view">
+            <div class="list-empty">No tasks</div>
           </div>
-          <div class="kanban-column" data-status="done">
-            <header>Done</header>
-            <div id="tasks-done" class="column-items">
-              <div class="list-empty">No tasks</div>
-            </div>
-          </div>
-          <div class="kanban-column" data-status="cancelled">
-            <header>Cancelled</header>
-            <div id="tasks-cancelled" class="column-items">
-              <div class="list-empty">No tasks</div>
-            </div>
+        </div>
+        <div id="tasks-view-calendar" class="task-view-panel">
+          <div id="tasks-calendar-view" class="tasks-calendar-view">
+            <div class="list-empty">No tasks with due dates</div>
           </div>
         </div>
       </div>
@@ -288,15 +306,31 @@
               <span id="stat-avg-focus" class="value">0</span>
             </div>
           </div>
+
+          <div class="report-card insights-card full-width">
+            <h3>Highlights</h3>
+            <ul id="report-insights" class="insights-list">
+              <li>Loading insights...</li>
+            </ul>
+          </div>
           
           <div class="report-card chart-card full-width">
              <h3>Productivity Trend</h3>
              <canvas id="chart-productivity"></canvas>
           </div>
+
+          <div class="report-card chart-card full-width">
+             <h3>Journal Consistency</h3>
+             <canvas id="chart-journal-consistency"></canvas>
+          </div>
           
           <div class="report-card chart-card">
              <h3>Emotional Distribution</h3>
              <canvas id="chart-emotions"></canvas>
+          </div>
+          <div class="report-card chart-card">
+             <h3>Mood Distribution</h3>
+             <canvas id="chart-moods"></canvas>
           </div>
           <div class="report-card list-card">
              <h3>Project Health</h3>
@@ -314,6 +348,15 @@
           <div class="report-card chart-card">
              <h3>Time Allocation (hr)</h3>
              <canvas id="chart-time"></canvas>
+          </div>
+
+          <div class="report-card chart-card">
+             <h3>Task Status (Created in Range)</h3>
+             <canvas id="chart-task-status"></canvas>
+          </div>
+          <div class="report-card chart-card">
+             <h3>Open Task Due Buckets</h3>
+             <canvas id="chart-due-buckets"></canvas>
           </div>
         </div>
       </div>
@@ -363,6 +406,7 @@
 
   <aside id="right-sidebar" aria-labelledby="sidebar-title">
     <div id="sidebar-title" class="sidebar-header">Thinking Partner</div>
+    <div id="ai-sidebar-companion" class="ai-companion-stack" aria-live="polite"></div>
     <div class="ai-chat-messages" aria-live="polite">
       <div class="ai-bubble">Write in your journal to begin.</div>
     </div>

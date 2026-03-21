@@ -281,6 +281,31 @@ function updateToolCard(payload) {
             : "Action completed successfully. AI is interpreting the results...";
 
     if (card) {
+        let extraHtml = "";
+
+        if (!isError && payload.name === "list_tasks") {
+            const tasks = payload.result?.tasks;
+            if (Array.isArray(tasks)) {
+                const rows = tasks.slice(0, 12).map((t) => {
+                    const id = String(t.id || "");
+                    const shortId = id ? id.slice(0, 6) : "??????";
+                    const title = escapeHtml(String(t.title || "(untitled)"));
+                    const statusTxt = escapeHtml(String(t.status || ""));
+                    const due = escapeHtml(String(t.due_date || "No Date"));
+                    return `<div class="report-list-item"><span>[${shortId}] ${title}</span><span class="status">${statusTxt} · ${due}</span></div>`;
+                }).join("");
+
+                extraHtml = `
+                    <div class="tool-body" style="margin-top:10px;">
+                        <div class="report-list">${rows || "<div class='report-list-item'>No tasks found.</div>"}</div>
+                        <div style="margin-top:8px; color: var(--color-muted); font-size: 12px;">
+                            Tip: say “cancel [id6]” or “complete [id6]” (example: cancel [a1b2c3]).
+                        </div>
+                    </div>
+                `;
+            }
+        }
+
         card.innerHTML = `
             <div class="tool-header">
                 <strong>${heading}</strong>
@@ -288,6 +313,7 @@ function updateToolCard(payload) {
             <div class="tool-body">
                 <em>${message}</em>
             </div>
+            ${extraHtml}
         `;
     }
 }

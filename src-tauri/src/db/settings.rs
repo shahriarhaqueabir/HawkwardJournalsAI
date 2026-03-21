@@ -31,9 +31,8 @@ pub fn seed_defaults(conn: &Connection) -> Result<(), AppError> {
 }
 
 pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<SettingItem>, AppError> {
-    let mut stmt = conn.prepare(
-        "SELECT key, value, updated_at FROM app_settings WHERE key = ?1"
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT key, value, updated_at FROM app_settings WHERE key = ?1")?;
 
     let row = stmt.query_row(params![key], |row| {
         Ok(SettingItem {
@@ -51,9 +50,8 @@ pub fn get_setting(conn: &Connection, key: &str) -> Result<Option<SettingItem>, 
 }
 
 pub fn list_settings(conn: &Connection) -> Result<Vec<SettingItem>, AppError> {
-    let mut stmt = conn.prepare(
-        "SELECT key, value, updated_at FROM app_settings ORDER BY key ASC"
-    )?;
+    let mut stmt =
+        conn.prepare("SELECT key, value, updated_at FROM app_settings ORDER BY key ASC")?;
 
     let rows = stmt.query_map([], |row| {
         Ok(SettingItem {

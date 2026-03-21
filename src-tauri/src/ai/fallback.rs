@@ -1,5 +1,5 @@
-use serde_json::Value;
 use regex::Regex;
+use serde_json::Value;
 
 pub struct ExtractedToolCall {
     pub name: String,
@@ -18,7 +18,9 @@ pub fn extract_tool_calls(text: &str) -> Vec<ExtractedToolCall> {
             }
         }
     }
-    if !results.is_empty() { return results; }
+    if !results.is_empty() {
+        return results;
+    }
 
     // Pattern 2: ```json {...} ```
     let fence_re = Regex::new(r"```json(?s)(.*?)```").unwrap();
@@ -29,7 +31,9 @@ pub fn extract_tool_calls(text: &str) -> Vec<ExtractedToolCall> {
             }
         }
     }
-    if !results.is_empty() { return results; }
+    if !results.is_empty() {
+        return results;
+    }
 
     // Pattern 3: First complete JSON object with "name" key
     // This is more complex; we'll look for anything that looks like a JSON object
@@ -64,14 +68,20 @@ fn val_to_call(v: &Value) -> Option<ExtractedToolCall> {
 
     // Guard 3: only match known tool names to prevent false positives
     let known_tools = [
-        "create_task", "update_task", "complete_task",
-        "list_tasks", "search_journal", "fetch_url",
+        "create_task",
+        "update_task",
+        "complete_task",
+        "list_tasks",
+        "search_journal",
+        "fetch_url",
     ];
     if !known_tools.contains(&name.as_str()) {
         return None;
     }
 
-    let arguments = v.get("arguments").cloned()
+    let arguments = v
+        .get("arguments")
+        .cloned()
         .or_else(|| v.get("parameters").cloned())
         .unwrap_or(Value::Object(serde_json::Map::new()));
 

@@ -37,13 +37,13 @@ pub fn create_conversation(
 ) -> Result<String, AppError> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now().to_rfc3339();
-    
+
     conn.execute(
         "INSERT INTO ai_conversations (id, title, model, source, source_entry_id, created_at, updated_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
         params![id, "New Chat", "llama3.2", source, entry_id, now, now],
     )?;
-    
+
     Ok(id)
 }
 
@@ -51,9 +51,11 @@ pub fn list_conversations(
     conn: &Connection,
     source_filter: Option<&str>,
 ) -> Result<Vec<AiConversation>, AppError> {
-    let mut query = "SELECT id, title, model, source, source_entry_id, created_at, updated_at, is_deleted 
-                     FROM ai_conversations WHERE is_deleted = 0".to_string();
-    
+    let mut query =
+        "SELECT id, title, model, source, source_entry_id, created_at, updated_at, is_deleted 
+                     FROM ai_conversations WHERE is_deleted = 0"
+            .to_string();
+
     if source_filter.is_some() {
         query.push_str(" AND source = ?1");
     }
@@ -73,6 +75,22 @@ pub fn list_conversations(
     Ok(results)
 }
 
+pub fn get_conversation(conn: &Connection, id: &str) -> Result<Option<AiConversation>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, title, model, source, source_entry_id, created_at, updated_at, is_deleted
+         FROM ai_conversations
+         WHERE id = ?1 AND is_deleted = 0",
+    )?;
+
+    let row = stmt.query_row(params![id], map_conversation);
+
+    match row {
+        Ok(conv) => Ok(Some(conv)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(AppError::Database(e.to_string())),
+    }
+}
+
 fn map_conversation(row: &rusqlite::Row) -> rusqlite::Result<AiConversation> {
     Ok(AiConversation {
         id: row.get(0)?,
@@ -86,39 +104,33 @@ fn map_conversation(row: &rusqlite::Row) -> rusqlite::Result<AiConversation> {
     })
 }
 
-pub fn add_message(
-    conn: &Connection,
-    msg: &AiMessage,
-) -> Result<(), AppError> {
+pub fn add_message(conn: &Connection, msg: &AiMessage) -> Result<(), AppError> {
     let now = Utc::now().to_rfc3339();
     conn.execute(
         "INSERT INTO ai_messages (id, conversation_id, role, content, tool_name, tool_args, tool_result, confirmed, model, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
         params![
-            msg.id, msg.conversation_id, msg.role, msg.content, 
-            msg.tool_name, msg.tool_args, msg.tool_result, 
+            msg.id, msg.conversation_id, msg.role, msg.content,
+            msg.tool_name, msg.tool_args, msg.tool_result,
             msg.confirmed, msg.model, now
         ],
     )?;
-    
+
     // Update conversation timestamp
     conn.execute(
         "UPDATE ai_conversations SET updated_at = ?1 WHERE id = ?2",
         params![now, msg.conversation_id],
     )?;
-    
+
     Ok(())
 }
 
-pub fn get_messages(
-    conn: &Connection,
-    conversation_id: &str,
-) -> Result<Vec<AiMessage>, AppError> {
+pub fn get_messages(conn: &Connection, conversation_id: &str) -> Result<Vec<AiMessage>, AppError> {
     let mut stmt = conn.prepare(
         "SELECT id, conversation_id, role, content, tool_name, tool_args, tool_result, confirmed, model, created_at
          FROM ai_messages WHERE conversation_id = ?1 ORDER BY created_at ASC",
     )?;
-    
+
     let rows = stmt.query_map(params![conversation_id], |row| {
         Ok(AiMessage {
             id: row.get(0)?,
@@ -173,7 +185,7 @@ pub fn save_analysis_result(
     result: &crate::ai::AnalysisResult,
 ) -> Result<(), AppError> {
     let now = Utc::now().to_rfc3339();
-    
+
     // 1. Update the journal entry with summary and metadata
     conn.execute(
         "UPDATE journal_entries SET 
@@ -194,14 +206,14 @@ pub fn save_analysis_result(
         ],
     )?;
 
-    // 2. Clear old tasks from this analysis if needed? 
+    // 2. Clear old tasks from this analysis if needed?
     // Spec D-106 says analysis fires on save, but we should be careful about duplicates.
     // For now, we trust the pipeline's deduplication.
 
-    // 3. Create tasks (D-19/D-95 require confirmation for AI writes, but 
+    // 3. Create tasks (D-19/D-95 require confirmation for AI writes, but
     // background analysis tasks are PERSISTED as PROPOSED_TASKS or similar?
     // Looking at schema: proposed_task_log is for this purpose.
-    
+
     for task in &result.tasks {
         log_ai_feedback(
             conn,
@@ -209,7 +221,7 @@ pub fn save_analysis_result(
             Some(&result.id),
             "proposed",
             "task",
-            &serde_json::to_string(&task).unwrap_or_default()
+            &serde_json::to_string(&task).unwrap_or_default(),
         )?;
     }
 
