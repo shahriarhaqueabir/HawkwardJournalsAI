@@ -61,23 +61,32 @@ async fn save_journal_entry(
     // D-112: Trigger Background Analysis (Check BEFORE moving content)
     let should_analyze = state.ai_state.should_analyze(&entry_id, &content).await;
 
-    let entry = db::journal::JournalEntry {
+    let conn = state.conn.lock().await;
+
+    // Preserve analysis data if updating an existing entry
+    let existing = db::journal::get_entry_by_id(&conn, &entry_id).unwrap_or(None);
+
+    let mut entry = db::journal::JournalEntry {
         id: entry_id.clone(),
         title: title_clone,
         content,
         analysis_summary: None,
         analysis_mood: None,
-        analysis_insights: "[]".into(),
-        emotions: "".into(),
-        tags: "".into(),
+        analysis_insights: "".into(),
+        emotions: "[]".into(),
+        tags: "[]".into(),
         last_analysis_conv_id: None,
         last_analysed_at: None,
         word_count,
         created_at: now.clone(),
-        updated_at: now,
+        updated_at: now.clone(),
     };
 
-    let conn = state.conn.lock().await;
+    if let Some(existing) = existing {
+        entry.created_at = existing.created_at.clone();
+        db::journal::merge_analysis_data(&existing, &mut entry);
+    }
+
     db::journal::upsert_entry(&conn, &entry)?;
     drop(conn);
 
@@ -332,6 +341,14 @@ async fn task_update_status(
         Ok(_) => {
             if status == "done" {
                 crate::events::emit(&state.handle, crate::events::AppEvent::TaskCompleted { id });
+
+                // D-121: Trigger proactive reflection in background
+                let state_clone = state.inner().clone();
+                tauri::async_runtime::spawn(async move {
+                    let _ =
+                        ai_maybe_emit_proactive_nudge_internal(state_clone, "task_completed".into())
+                            .await;
+                });
             } else {
                 crate::events::emit(&state.handle, crate::events::AppEvent::TaskUpdated { id });
             }
@@ -501,8 +518,28 @@ async fn ollama_health_check() -> Result<bool, AppError> {
     }
 }
 
+/// Count the number of tokens in `text` using the cl100k_base (GPT-4 / LLaMA 3) vocabulary.
+/// Returns the raw token count. Suitable for the Settings page token meter.
+#[tauri::command]
+fn ai_count_tokens(text: String) -> Result<usize, AppError> {
+    Ok(ai::tokens::count_tokens(&text))
+}
+
+/// Return a full `TokenBudget` snapshot for `text` within a given `context_window`.
+/// If `context_window` is 0, uses the default (16384, D-93).
+#[tauri::command]
+fn ai_get_token_budget(text: String, context_window: usize) -> Result<ai::tokens::TokenBudget, AppError> {
+    let window = if context_window == 0 {
+        ai::tokens::DEFAULT_CONTEXT_TOKENS
+    } else {
+        context_window
+    };
+    Ok(ai::tokens::TokenBudget::calculate(&text, window))
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    crate::logger::init();
     let data_dir = resolve_data_dir();
     let conn_raw = db::init::initialise().expect("Failed to initialise database");
     let conn = Arc::new(Mutex::new(conn_raw));
@@ -522,6 +559,7 @@ pub fn run() {
         ))
         .setup(move |app| {
             let handle = app.handle().clone();
+            crate::logger::set_handle(handle.clone());
 
             let app_state = AppState {
                 conn: conn.clone(),
@@ -619,6 +657,19 @@ pub fn run() {
             ai_message_list,
             ai_conversation_delete,
             ai_confirm_tool,
+            ai_list_pinned_memory,
+            ai_upsert_pinned_memory,
+            ai_delete_pinned_memory,
+            trash_list,
+            trash_empty,
+            db_manual_backup,
+            db_export_json,
+            db_reset,
+            db_get_audit_log,
+            ai_get_queue_status,
+            db_get_path,
+            ai_count_tokens,
+            ai_get_token_budget,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -711,6 +762,7 @@ async fn ai_chat(
         recent_patterns: memory_context.recent_patterns,
         related_journal: memory_context.related_journal,
         current_entry: memory_context.current_entry,
+        pinned_points: memory_context.pinned_points,
     };
 
     let system_prompt = ai::prompt::build_system_prompt(&prompt_input);
@@ -821,6 +873,7 @@ async fn ai_chat(
 
                                             match ai::tools::execute_tool_call(
                                                 &handle,
+                                                Some(conv_id_clone.clone()),
                                                 &tool_state,
                                                 name,
                                                 args.clone(),
@@ -929,6 +982,7 @@ async fn ai_chat(
 
                                             match ai::tools::execute_tool_call(
                                                 &handle,
+                                                Some(conv_id_clone.clone()),
                                                 &tool_state,
                                                 &name,
                                                 args.clone(),
@@ -1054,6 +1108,13 @@ async fn ai_maybe_emit_proactive_nudge(
     state: tauri::State<'_, AppState>,
     trigger: String,
 ) -> Result<bool, AppError> {
+    ai_maybe_emit_proactive_nudge_internal(state.inner().clone(), trigger).await
+}
+
+async fn ai_maybe_emit_proactive_nudge_internal(
+    state: AppState,
+    trigger: String,
+) -> Result<bool, AppError> {
     let trigger = ai::companion::ProactiveTrigger::from_str(&trigger)?;
     let client = state.ollama.clone();
     let handle = state.handle.clone();
@@ -1089,6 +1150,43 @@ async fn ai_maybe_emit_proactive_nudge(
     );
 
     Ok(true)
+}
+
+#[tauri::command]
+async fn ai_list_pinned_memory(
+    state: tauri::State<'_, AppState>,
+) -> Result<Vec<db::ai::AiPinnedMemory>, AppError> {
+    let conn = state.conn.lock().await;
+    db::ai::list_pinned_memory(&conn)
+}
+
+#[tauri::command]
+async fn ai_upsert_pinned_memory(
+    state: tauri::State<'_, AppState>,
+    id: Option<String>,
+    content: String,
+    importance: i32,
+) -> Result<(), AppError> {
+    let conn = state.conn.lock().await;
+    let now = chrono::Utc::now().to_rfc3339();
+    let memory = db::ai::AiPinnedMemory {
+        id: id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+        content,
+        importance,
+        metadata: None,
+        created_at: now.clone(),
+        updated_at: now,
+    };
+    db::ai::upsert_pinned_memory(&conn, &memory)
+}
+
+#[tauri::command]
+async fn ai_delete_pinned_memory(
+    state: tauri::State<'_, AppState>,
+    id: String,
+) -> Result<bool, AppError> {
+    let conn = state.conn.lock().await;
+    db::ai::delete_pinned_memory(&conn, &id)
 }
 
 #[tauri::command]
@@ -1239,4 +1337,61 @@ async fn task_delete(state: tauri::State<'_, AppState>, id: String) -> Result<bo
             Err(e)
         }
     }
+}
+
+#[tauri::command]
+async fn trash_list(state: tauri::State<'_, AppState>) -> Result<Vec<db::trash::TrashItem>, AppError> {
+    let conn = state.conn.lock().await;
+    db::trash::list_trash(&conn)
+}
+
+#[tauri::command]
+async fn trash_empty(state: tauri::State<'_, AppState>) -> Result<u32, AppError> {
+    let conn = state.conn.lock().await;
+    db::trash::empty_trash(&conn)
+}
+
+#[tauri::command]
+async fn db_manual_backup(state: tauri::State<'_, AppState>) -> Result<String, AppError> {
+    let conn = state.conn.lock().await;
+    crate::backup::manual::perform_backup(&conn)
+}
+
+#[tauri::command]
+async fn db_export_json(state: tauri::State<'_, AppState>) -> Result<String, AppError> {
+    let conn = state.conn.lock().await;
+    crate::backup::export::export_to_json(&conn)
+}
+
+#[tauri::command]
+async fn db_reset(state: tauri::State<'_, AppState>) -> Result<(), AppError> {
+    let mut conn = state.conn.lock().await;
+    db::migrations::reset_database(&mut conn)
+}
+
+#[tauri::command]
+async fn db_get_audit_log(state: tauri::State<'_, AppState>, limit: u32) -> Result<Vec<db::audit::AuditEntry>, AppError> {
+    let conn = state.conn.lock().await;
+    db::audit::get_recent_logs(&conn, limit)
+}
+
+#[tauri::command]
+async fn ai_get_queue_status(state: tauri::State<'_, AppState>) -> Result<serde_json::Value, AppError> {
+    let queue = state.ai_state.queue.lock().await;
+    let status = state.ai_state.status.lock().await;
+    
+    Ok(serde_json::json!({
+        "queue_length": queue.len(),
+        "processing_count": status.values().filter(|s| match s {
+            crate::ai::AnalysisStatus::Processing => true,
+            _ => false
+        }).count(),
+    }))
+}
+
+#[tauri::command]
+async fn db_get_path() -> Result<String, AppError> {
+    let data_dir = crate::db::paths::resolve_data_dir();
+    let db_path = data_dir.join("hawkward.db");
+    Ok(db_path.to_string_lossy().into_owned())
 }

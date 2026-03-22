@@ -12,16 +12,14 @@ HawkwardJournalAI is a private, offline-first Windows desktop productivity app b
 
 ## Current Build Status
 
-**Phase:** Phase 3 (AI Chat & Tool Engine) hardening is actively in progress. Phase 2 is complete. Phase 4 (Reports) is partially wired but not feature-complete.
-**Last built:** Phase 3 prompt and tool-contract hardening, stricter analysis parsing, persisted analysis summary/mood/insights, AI chat safety fixes, frontend tab repair (Settings activation, journal search/re-analysis, sidebar wiring, reports event refresh), scoped review of `AIToolssuggestions.md`, safer `fetch_url`, and partial runtime validation of the live Tauri/Ollama stack.
+**Phase:** Phase 3 (AI Chat & Tool Engine) and Phase 4 (Reports) are largely complete and undergoing final polish.
+**Last built:** Phase 3 and Phase 4 core features, including AI tool context association (conversation_id), full Analytical Reports (6 charts/metrics), SVG fallbacks for Chart.js, and first-class Project CRUD.
 **Open issues:**
 - Complete full in-window manual validation of AI chat tool flows (`create_task`, `update_task`, `complete_task`, `list_tasks`, `search_journal`, `fetch_url`), especially confirm/cancel/timeout UX.
-- Build the 6 Analytical Reports (Phase 4) beyond the current backend/frontend scaffolding and fallback rendering.
-- Properly load vendored frontend libraries like Chart.js/Marked.js in all intended report surfaces instead of relying on fallback-only behavior.
 - Fill remaining task/settings UI gaps (timers, dependencies, fuller settings coverage, deeper CRUD surfaces).
-- Address D-13 spec violation (Projects recently implemented as first-class entity rather than a text field).
+- Standardize any remaining relative path handling for attachments.
 **Spec files:** `AgentDocs/HawkwardJournalAI_MASTER_SPEC_v1.6.md` + `AgentDocs/HawkwardJournalAI_SPEC_ADDENDUM_v1.7.md`
-**Locked decisions:** D-01 through D-111 (111 total)
+**Locked decisions:** D-01 through D-112 (112 total)
 
 ---
 

@@ -1,6 +1,6 @@
 use crate::error::AppError;
 use crate::events::{emit, AppEvent};
-use chrono::NaiveDate;
+use chrono::{NaiveDate, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -140,27 +140,12 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "query": { "type": "string", "description": "Optional title/keyword filter for resolving tasks mentioned by name (case-insensitive substring match)." },
-                    "match_recent": { "type": "boolean", "description": "If true, return the most recently created tasks first (useful for 'that task' / 'the last one')." },
-                    "limit": { "type": "integer", "minimum": 1, "maximum": 50, "description": "Optional max results (recommended when resolving by name)." },
+                    "query": { "type": "string", "description": "Optional title/keyword filter." },
+                    "limit": { "type": "integer", "description": "Max results." },
                     "statuses": { "type": "array", "items": { "type": "string", "enum": ["todo", "in_progress", "done", "cancelled"] } },
-                    "exclude_statuses": { "type": "array", "items": { "type": "string", "enum": ["todo", "in_progress", "done", "cancelled"] } },
-                    "priorities": { "type": "array", "items": { "type": "string", "enum": ["low", "medium", "high", "urgent"] } },
                     "project_id": { "type": "string" },
-                    "category": { "type": "string" },
-                    "energy_levels": { "type": "array", "items": { "type": "string", "enum": ["deep_focus", "light", "admin", "errand"] } },
-                    "context_tags": { "type": "array", "items": { "type": "string", "enum": ["computer", "phone", "errands", "home", "anywhere"] } },
-                    "tags": { "type": "array", "items": { "type": "string" } },
-                    "due_before": {
-                        "type": "string",
-                        "description": "ISO 8601 date (YYYY-MM-DD)",
-                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-                    },
-                    "due_after": {
-                        "type": "string",
-                        "description": "ISO 8601 date (YYYY-MM-DD)",
-                        "pattern": "^\\d{4}-\\d{2}-\\d{2}$"
-                    }
+                    "due_before": { "type": "string", "description": "YYYY-MM-DD" },
+                    "due_after": { "type": "string", "description": "YYYY-MM-DD" }
                 },
                 "additionalProperties": false
             }),
@@ -209,11 +194,49 @@ pub fn get_tool_definitions() -> Vec<ToolDefinition> {
                 "additionalProperties": false
             }),
         },
+        ToolDefinition {
+            name: "search_conversations".into(),
+            description: "Search across all past AI chat history for a keyword or phrase. Use when the user asks 'what did we talk about...' or 'did I tell you already...'. Read-only tool.".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "minLength": 2, "maxLength": 100 }
+                },
+                "required": ["query"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "pin_memory".into(),
+            description: "Save a key fact about the user for long-term personalization (e.g., 'prefers deep work in mornings', 'has a dog named Rex'). Only use when the user explicitly asks to remember a fact or when a significant preference is revealed. Requires user confirmation.".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "content": { "type": "string", "minLength": 5, "maxLength": 300, "description": "The fact to remember (concise third-person statement)." },
+                    "importance": { "type": "integer", "minimum": 1, "maximum": 5, "description": "1=casual, 3=important, 5=critical" }
+                },
+                "required": ["content"],
+                "additionalProperties": false
+            }),
+        },
+        ToolDefinition {
+            name: "delete_memory".into(),
+            description: "Remove a fact from the long-term pinned memory. Requires the exact text of the fact to find and remove it. Requires user confirmation.".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "content": { "type": "string", "description": "The text of the pinned memory to delete." }
+                },
+                "required": ["content"],
+                "additionalProperties": false
+            }),
+        },
     ]
 }
 
 pub async fn execute_tool_call(
     app: &AppHandle,
+    conversation_id: Option<String>,
     tool_state: &AiToolState,
     name: &str,
     mut args: Value,
@@ -224,7 +247,17 @@ pub async fn execute_tool_call(
         // --- Confirmable Tools ---
         "create_task" | "update_task" | "complete_task" | "delete_task" => {
             if matches!(name, "create_task" | "update_task") {
-                strip_blank_optional_strings(&mut args, &["due_date"]);
+                strip_blank_optional_strings(
+                    &mut args,
+                    &[
+                        "due_date",
+                        "project_id",
+                        "energy_level",
+                        "context_tag",
+                        "status",
+                        "priority",
+                    ],
+                );
             }
             if let Err(message) = validate_mutating_tool_args(name, &args) {
                 return Ok((
@@ -280,7 +313,7 @@ pub async fn execute_tool_call(
             }
 
             // Execute actual logic
-            match crate::db::tasks::execute_ai_tool(app, name, args).await {
+            match crate::db::tasks::execute_ai_tool(app, conversation_id, name, args).await {
                 Ok(res) => Ok((call_id, res)),
                 Err(e) => Ok((
                     call_id,
@@ -298,8 +331,9 @@ pub async fn execute_tool_call(
             args = normalize_readonly_tool_args(name, args).map_err(AppError::InvalidInput)?;
             strip_blank_optional_strings(
                 &mut args,
-                &["project_id", "category", "due_before", "due_after"],
+                &["query", "limit", "project_id", "category", "due_before", "due_after"],
             );
+            coerce_string_to_integer(&mut args, &["limit"]);
             if let Err(message) = validate_list_tasks_args(&args) {
                 return Ok((
                     call_id,
@@ -480,6 +514,102 @@ pub async fn execute_tool_call(
                 }
             }
         }
+        "pin_memory" | "delete_memory" => {
+            if name == "pin_memory" {
+                coerce_string_to_integer(&mut args, &["importance"]);
+            }
+            let (tx, rx) = oneshot::channel();
+
+            {
+                let mut pending = tool_state.pending_confirmations.lock().await;
+                pending.insert(call_id.clone(), ToolConfirmation { tx });
+            }
+
+            emit(
+                app,
+                AppEvent::AiToolPending {
+                    call_id: call_id.clone(),
+                    name: name.to_string(),
+                    args: args.clone(),
+                    description: if name == "pin_memory" {
+                        "AI wants to remember a specific fact about you...".into()
+                    } else {
+                        "AI wants to forget a specific pinned fact...".into()
+                    },
+                },
+            );
+
+            let confirmed = tokio::select! {
+                res = rx => res.unwrap_or(false),
+                _ = tokio::time::sleep(Duration::from_secs(300)) => {
+                    let mut pending = tool_state.pending_confirmations.lock().await;
+                    pending.remove(&call_id);
+                    emit(app, AppEvent::AiConfirmTimeout {
+                        call_id: call_id.clone(),
+                        tool_name: name.to_string(),
+                    });
+                    false
+                }
+            };
+
+            if !confirmed {
+                return Ok((
+                    call_id,
+                    json!({
+                        "status": "cancelled",
+                        "message": "User declined the operation or it timed out after 300 seconds."
+                    }),
+                ));
+            }
+
+            let conn_arc = app.state::<crate::AppState>().conn.clone();
+            let conn = conn_arc.lock().await;
+
+            if name == "pin_memory" {
+                let content = args["content"].as_str().unwrap_or_default().to_string();
+                let importance = args["importance"].as_i64().unwrap_or(1) as i32;
+                let now = Utc::now().to_rfc3339();
+                let mem = crate::db::ai::AiPinnedMemory {
+                    id: uuid::Uuid::new_v4().to_string(),
+                    content,
+                    importance,
+                    metadata: None,
+                    created_at: now.clone(),
+                    updated_at: now,
+                };
+                crate::db::ai::upsert_pinned_memory(&conn, &mem)?;
+                Ok((call_id, json!({ "status": "success", "message": "Memory pinned successfully." })))
+            } else {
+                let content = args["content"].as_str().unwrap_or_default();
+                // Find by content
+                let pinned = crate::db::ai::list_pinned_memory(&conn)?;
+                if let Some(p) = pinned.iter().find(|m| m.content.contains(content)) {
+                    crate::db::ai::delete_pinned_memory(&conn, &p.id)?;
+                    Ok((call_id, json!({ "status": "success", "message": "Memory deleted successfully." })))
+                } else {
+                    Ok((call_id, json!({ "status": "error", "message": "Memory not found." })))
+                }
+            }
+        }
+        "search_conversations" => {
+            let query = args["query"].as_str().unwrap_or_default();
+            emit(app, AppEvent::AiStatus("Searching conversations...".into()));
+            
+            let conn_arc = app.state::<crate::AppState>().conn.clone();
+            let conn = conn_arc.lock().await;
+
+            let results = crate::db::ai::search_messages(&conn, query)?;
+            let compact = results.into_iter().map(|m| {
+                json!({
+                    "role": m.role,
+                    "content": m.content,
+                    "created_at": m.created_at,
+                    "conversation_id": m.conversation_id
+                })
+            }).collect::<Vec<_>>();
+
+            Ok((call_id, json!({ "status": "success", "results": compact })))
+        }
         _ => Err(AppError::InvalidInput(format!("Unknown tool: {}", name))),
     }
 }
@@ -531,6 +661,22 @@ fn strip_blank_optional_strings(args: &mut Value, keys: &[&str]) {
 
         if should_remove {
             obj.remove(*key);
+        }
+    }
+}
+
+fn coerce_string_to_integer(args: &mut Value, keys: &[&str]) {
+    let Some(obj) = args.as_object_mut() else {
+        return;
+    };
+
+    for key in keys {
+        if let Some(val) = obj.get(*key) {
+            if let Some(s) = val.as_str() {
+                if let Ok(num) = s.parse::<i64>() {
+                    obj.insert(key.to_string(), json!(num));
+                }
+            }
         }
     }
 }

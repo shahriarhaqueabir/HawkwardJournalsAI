@@ -17,8 +17,19 @@ export function initAiSidebar() {
     const { type } = payload;
 
     switch (type) {
+      case "ai_tool_pending":
+        showProcessingStatus(`Requesting confirmation for ${payload.name}...`);
+        renderToolConfirmation(payload);
+        break;
+      case "ai_tool_result":
+        showProcessingStatus(`Interpreting results from ${payload.name}...`);
+        updateToolCard(payload);
+        break;
+      case "ai_confirm_timeout":
+        updateToolTimeoutCard(payload);
+        break;
       case "ai_status":
-        if (input === document.activeElement) {
+        if (input === document.activeElement || payload.message?.includes("Searching")) {
           showProcessingStatus(payload.message || "Thinking...");
         }
         break;
@@ -318,5 +329,75 @@ export function initAiSidebar() {
     }
   });
 
+  function renderToolConfirmation(payload) {
+    if (!messagesEl) return;
+    const html = `
+        <div class="tool-card message-row system" id="tool-${payload.call_id}">
+            <div class="tool-header">
+                <strong>AI Action: ${payload.name.replace("_", " ")}</strong>
+            </div>
+            <div class="tool-body">
+                ${payload.description}
+                <pre style="max-height: 100px; overflow-y: auto; font-size: 11px;">${JSON.stringify(payload.args, null, 2)}</pre>
+            </div>
+            <div class="tool-actions">
+                <button class="btn-primary btn-sm btn-confirm" onclick="confirmAiTool('${payload.call_id}', true)">Confirm</button>
+                <button class="btn-ghost btn-sm btn-cancel" onclick="confirmAiTool('${payload.call_id}', false)">Cancel</button>
+            </div>
+        </div>
+    `;
+    messagesEl.insertAdjacentHTML("beforeend", html);
+    messagesEl.scrollTop = messagesEl.scrollHeight;
+  }
+
+  function updateToolCard(payload) {
+    let card = document.getElementById(`tool-${payload.call_id}`);
+    if (!card) return;
+
+    const status = payload.result?.status;
+    const isError = status === "error";
+    const isCancelled = status === "cancelled" || payload.confirmed === false;
+    const heading = isError
+      ? `Failed: ${payload.name.replace("_", " ")}`
+      : isCancelled
+        ? `Cancelled: ${payload.name.replace("_", " ")}`
+        : `Completed: ${payload.name.replace("_", " ")}`;
+
+    const message = isError
+      ? escapeHtml(payload.result?.message || "Error")
+      : isCancelled
+        ? escapeHtml(payload.result?.message || "Cancelled")
+        : "Done. AI is interpreting...";
+
+    card.innerHTML = `
+        <div class="tool-header">
+            <strong>${heading}</strong>
+        </div>
+        <div class="tool-body">
+            <em>${message}</em>
+        </div>
+    `;
+  }
+
+  function updateToolTimeoutCard(payload) {
+    const card = document.getElementById(`tool-${payload.call_id}`);
+    if (!card) return;
+
+    card.innerHTML = `
+        <div class="tool-header">
+            <strong>Timed out: ${payload.tool_name.replace("_", " ")}</strong>
+        </div>
+        <div class="tool-body">
+            <em>Request expired after 300 seconds.</em>
+        </div>
+    `;
+  }
+
   requestProactiveNudge("app_open");
+}
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text ?? "";
+  return div.innerHTML;
 }

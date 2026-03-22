@@ -125,6 +125,7 @@ pub async fn maybe_run_weekly_review(app: &AppHandle) -> Result<(), AppError> {
         recent_patterns: prompt_memory.recent_patterns,
         related_journal: prompt_memory.related_journal,
         current_entry: None,
+        pinned_points: prompt_memory.pinned_points,
     };
 
     let generated = match client.chat_single_with_input(&prompt, prompt_input).await {

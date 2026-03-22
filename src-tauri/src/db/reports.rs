@@ -299,9 +299,35 @@ pub fn get_report_data(conn: &Connection, days: i32) -> Result<ReportData, AppEr
         Err(_) => Vec::new(),
     };
 
-    // 5. Keyword Cloud (FTS5 tokenization mockup via simple count for now)
-    // Placeholder logic for keyword analysis
-    let keywords = vec![];
+    // 5. Keyword Cloud
+    let keyword_sql = "
+        SELECT word, SUM(count) as total_count FROM (
+            SELECT json_each.value as word, COUNT(*) as count 
+            FROM journal_entries, json_each(tags) 
+            WHERE is_deleted = 0 AND date(created_at) >= date('now', '-' || ?1 || ' days')
+            GROUP BY word
+            UNION ALL
+            SELECT json_each.value as word, COUNT(*) as count 
+            FROM tasks, json_each(tags) 
+            WHERE is_deleted = 0 AND date(created_at) >= date('now', '-' || ?1 || ' days')
+            GROUP BY word
+        )
+        GROUP BY word
+        ORDER BY total_count DESC
+        LIMIT 20;
+    ";
+    let keywords = match conn.prepare(keyword_sql) {
+        Ok(mut stmt) => stmt
+            .query_map(params![days], |row| {
+                Ok(KeywordStat {
+                    word: row.get(0)?,
+                    count: row.get(1)?,
+                })
+            })
+            .and_then(|rows| rows.collect::<Result<Vec<_>, _>>())
+            .unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
 
     // 6. Time Allocation
     let time_sql = "

@@ -79,7 +79,7 @@ function renderInsights(data) {
     return;
   }
 
-  el.innerHTML = insights.map((s) => `<li>${escapeHtml(String(s))}</li>`).join("");
+  el.innerHTML = marked.parse(insights.map(s => `- ${s}`).join("\n"));
 }
 
 function renderProductivityChart(stats) {

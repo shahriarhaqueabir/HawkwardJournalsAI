@@ -217,13 +217,118 @@ pub fn save_analysis_result(
     for task in &result.tasks {
         log_ai_feedback(
             conn,
-            "analysis", // No conversation ID for background worker
-            Some(&result.id),
+            "analysis", // Context is background analysis
+            Some(&result.id), // Source journal entry
             "proposed",
-            "task",
+            &task.title, // Use actual task title
             &serde_json::to_string(&task).unwrap_or_default(),
         )?;
     }
 
+    Ok(())
+}
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct AiPinnedMemory {
+    pub id: String,
+    pub content: String,
+    pub importance: i32,
+    pub metadata: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+pub fn list_pinned_memory(conn: &Connection) -> Result<Vec<AiPinnedMemory>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, content, importance, metadata, created_at, updated_at
+         FROM ai_pinned_memory ORDER BY importance DESC, created_at DESC",
+    )?;
+
+    let rows = stmt.query_map([], |row| {
+        Ok(AiPinnedMemory {
+            id: row.get(0)?,
+            content: row.get(1)?,
+            importance: row.get(2)?,
+            metadata: row.get(3)?,
+            created_at: row.get(4)?,
+            updated_at: row.get(5)?,
+        })
+    })?;
+
+    let mut results = Vec::new();
+    for row in rows {
+        results.push(row?);
+    }
+    Ok(results)
+}
+
+pub fn upsert_pinned_memory(conn: &Connection, mem: &AiPinnedMemory) -> Result<(), AppError> {
+    conn.execute(
+        "INSERT INTO ai_pinned_memory (id, content, importance, metadata, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+         ON CONFLICT(id) DO UPDATE SET
+            content = excluded.content,
+            importance = excluded.importance,
+            metadata = excluded.metadata,
+            updated_at = excluded.updated_at",
+        params![
+            mem.id,
+            mem.content,
+            mem.importance,
+            mem.metadata,
+            mem.created_at,
+            mem.updated_at
+        ],
+    )?;
+    Ok(())
+}
+
+pub fn delete_pinned_memory(conn: &Connection, id: &str) -> Result<bool, AppError> {
+    let rows = conn.execute("DELETE FROM ai_pinned_memory WHERE id = ?1", params![id])?;
+    Ok(rows > 0)
+}
+pub fn search_messages(conn: &Connection, query: &str) -> Result<Vec<AiMessage>, AppError> {
+    let mut stmt = conn.prepare(
+        "SELECT id, conversation_id, role, content, tool_name, tool_args, tool_result, confirmed, model, created_at
+         FROM ai_messages 
+         WHERE content LIKE ?1 AND role IN ('user', 'assistant')
+         ORDER BY created_at DESC LIMIT 50",
+    )?;
+
+    let rows = stmt.query_map(params![format!("%{}%", query)], |row| {
+        Ok(AiMessage {
+            id: row.get(0)?,
+            conversation_id: row.get(1)?,
+            role: row.get(2)?,
+            content: row.get(3)?,
+            tool_name: row.get(4)?,
+            tool_args: row.get(5)?,
+            tool_result: row.get(6)?,
+            confirmed: row.get(7)?,
+            model: row.get(8)?,
+            created_at: row.get(9)?,
+        })
+    })?;
+
+    let mut results = Vec::new();
+    for row in rows {
+        results.push(row?);
+    }
+    Ok(results)
+}
+pub fn seed_system_conversations(conn: &Connection) -> Result<(), AppError> {
+    let now = Utc::now().to_rfc3339();
+    // Ensure the "analysis" system conversation exists
+    conn.execute(
+        "INSERT OR IGNORE INTO ai_conversations (id, title, model, source, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            "analysis",
+            "Background Analysis",
+            "llama3.2",
+            "analysis",
+            now.clone(),
+            now
+        ],
+    )?;
     Ok(())
 }

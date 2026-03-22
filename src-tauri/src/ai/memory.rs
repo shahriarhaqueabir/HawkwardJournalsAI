@@ -9,6 +9,7 @@ pub struct PromptMemoryContext {
     pub recent_patterns: Vec<String>,
     pub related_journal: Vec<String>,
     pub current_entry: Option<String>,
+    pub pinned_points: Vec<String>,
 }
 
 pub fn build_prompt_memory(
@@ -40,6 +41,12 @@ pub fn build_prompt_memory(
         },
     )?;
 
+    let pinned = crate::db::ai::list_pinned_memory(conn)?;
+    let pinned_points = pinned
+        .into_iter()
+        .map(|p| format!("Pinned Point: {}", p.content))
+        .collect::<Vec<_>>();
+
     Ok(PromptMemoryContext {
         semantic_memory: build_semantic_memory(
             &entries_7d,
@@ -50,6 +57,7 @@ pub fn build_prompt_memory(
         recent_patterns: build_recent_patterns(&recent_entries),
         related_journal: build_related_journal_memory(&recent_entries),
         current_entry: current_entry.as_ref().map(build_current_entry_context),
+        pinned_points,
     })
 }
 
@@ -397,6 +405,15 @@ mod tests {
                 updated_at TEXT NOT NULL,
                 completed_at TEXT,
                 is_deleted INTEGER NOT NULL DEFAULT 0
+            );
+
+            CREATE TABLE ai_pinned_memory (
+                id TEXT PRIMARY KEY,
+                content TEXT NOT NULL,
+                importance INTEGER NOT NULL DEFAULT 1,
+                metadata TEXT,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
             );
             ",
         )

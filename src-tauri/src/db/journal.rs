@@ -52,7 +52,87 @@ pub fn upsert_entry(conn: &Connection, entry: &JournalEntry) -> Result<(), AppEr
             entry.updated_at
         ],
     )?;
+
+    super::audit::log_action(
+        conn,
+        "update",
+        "journal_entry",
+        &entry.id,
+        "user",
+        None,
+        entry.last_analysis_conv_id.clone(),
+    )?;
+
     Ok(())
+}
+
+pub fn merge_analysis_data(existing: &JournalEntry, new: &mut JournalEntry) {
+    if new.analysis_summary.is_none() {
+        new.analysis_summary = existing.analysis_summary.clone();
+    }
+    if new.analysis_mood.is_none() {
+        new.analysis_mood = existing.analysis_mood.clone();
+    }
+    if new.analysis_insights.is_empty() {
+        new.analysis_insights = existing.analysis_insights.clone();
+    }
+    if new.emotions.is_empty() || new.emotions == "[]" {
+        new.emotions = existing.emotions.clone();
+    }
+    if new.last_analysis_conv_id.is_none() {
+        new.last_analysis_conv_id = existing.last_analysis_conv_id.clone();
+    }
+    if new.last_analysed_at.is_none() {
+        new.last_analysed_at = existing.last_analysed_at.clone();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_merge_analysis_data_preserves_existing() {
+        let existing = JournalEntry {
+            id: "1".into(),
+            title: Some("Old".into()),
+            content: "Old content".into(),
+            analysis_summary: Some("Summary".into()),
+            analysis_mood: Some("Happy".into()),
+            analysis_insights: "Insights".into(),
+            emotions: "[\"Joy\"]".into(),
+            tags: "[]".into(),
+            last_analysis_conv_id: Some("conv1".into()),
+            last_analysed_at: Some("2023-01-01".into()),
+            word_count: 2,
+            created_at: "2023-01-01".into(),
+            updated_at: "2023-01-01".into(),
+        };
+
+        let mut new = JournalEntry {
+            id: "1".into(),
+            title: Some("New".into()),
+            content: "New content".into(),
+            analysis_summary: None,
+            analysis_mood: None,
+            analysis_insights: "".into(),
+            emotions: "".into(),
+            tags: "[]".into(),
+            last_analysis_conv_id: None,
+            last_analysed_at: None,
+            word_count: 2,
+            created_at: "2023-01-01".into(),
+            updated_at: "2023-01-02".into(),
+        };
+
+        merge_analysis_data(&existing, &mut new);
+
+        assert_eq!(new.analysis_summary, Some("Summary".into()));
+        assert_eq!(new.analysis_mood, Some("Happy".into()));
+        assert_eq!(new.analysis_insights, "Insights");
+        assert_eq!(new.emotions, "[\"Joy\"]");
+        assert_eq!(new.last_analysis_conv_id, Some("conv1".into()));
+    }
 }
 
 pub fn get_entry(conn: &Connection, id: &str) -> Result<Option<JournalEntry>, AppError> {
@@ -244,6 +324,10 @@ pub fn soft_delete(conn: &Connection, id: &str) -> Result<bool, AppError> {
         "UPDATE journal_entries SET is_deleted = 1, updated_at = ?1 WHERE id = ?2 AND is_deleted = 0",
         params![Utc::now().to_rfc3339(), id],
     )?;
+
+    if result > 0 {
+        super::audit::log_action(conn, "delete", "journal_entry", id, "user", None, None)?;
+    }
 
     Ok(result > 0)
 }

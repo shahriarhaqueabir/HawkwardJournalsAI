@@ -27,8 +27,15 @@
   --accent-rgb:      108, 142, 247;
   --font-ui:         'Segoe UI', system-ui, sans-serif;
   --font-mono:       'Cascadia Code', 'Consolas', monospace;
-  --radius:          6px;
-  --space:           12px;
+  --radius:          10px;
+  --space:           14px;
+
+  /* ── GLASSMORPHISM & PREMIUM TOKENS ────────────────── */
+  --glass-bg: rgba(22, 25, 37, 0.72);
+  --glass-border: rgba(255, 255, 255, 0.08);
+  --glass-blur: blur(14px);
+  --premium-accent: linear-gradient(135deg, var(--color-accent), #8ba3f9);
+  --shadow-premium: 0 12px 40px rgba(0, 0, 0, 0.45);
 }
 
 html, body {

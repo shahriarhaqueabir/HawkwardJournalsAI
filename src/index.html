@@ -15,17 +15,17 @@
   </head>
 <body>
   <div id="left-sidebar">
-    <div class="app-brand">🧠 HawkwardJournals</div>
+    <div class="app-brand"><i data-lucide="brain" class="brand-icon"></i> HawkwardJournals</div>
     <nav class="nav-menu">
-      <button class="nav-item active" data-tab="journal">📓 Journal</button>
-      <button class="nav-item" data-tab="tasks">✅ Tasks</button>
-      <button class="nav-item" data-tab="ai">🤖 AI</button>
-      <button class="nav-item" data-tab="reports">📊 Reports</button>
-      <button class="nav-item" data-tab="settings">⚙️ Settings</button>
+      <button class="nav-item active" data-tab="journal"><i data-lucide="notebook-pen"></i> Journal</button>
+      <button class="nav-item" data-tab="tasks"><i data-lucide="check-square-2"></i> Tasks</button>
+      <button class="nav-item" data-tab="ai"><i data-lucide="bot"></i> AI</button>
+      <button class="nav-item" data-tab="reports"><i data-lucide="bar-chart-2"></i> Reports</button>
+      <button class="nav-item" data-tab="settings"><i data-lucide="settings"></i> Settings</button>
     </nav>
     <div class="sidebar-footer">
-      <div id="ollama-status">🔴 Checking...</div>
-      <div id="db-path">📁 ./data/hawkward.db</div>
+      <div id="ollama-status"><i data-lucide="circle" class="status-icon status-unknown"></i> Checking...</div>
+      <div id="db-path"><i data-lucide="database"></i> ./data/hawkward.db</div>
       <div id="app-version">v0.1.0</div>
     </div>
   </div>
@@ -38,7 +38,7 @@
             <button id="btn-new-entry" class="btn-primary">+ New Entry</button>
             <div class="search-box">
               <input type="text" id="journal-search" placeholder="Search journal..." />
-              <span class="search-icon">🔍</span>
+              <span class="search-icon"><i data-lucide="search"></i></span>
             </div>
           </div>
           <div id="journal-entry-list" class="entry-list">
@@ -57,8 +57,8 @@
               </div>
             </div>
             <div class="header-actions">
-              <button id="btn-analyze" class="btn-ghost" title="Analyze with AI">🪄 Analyze</button>
-              <button id="btn-delete-entry" class="btn-danger" title="Move to Trash">🗑️</button>
+              <button id="btn-analyze" class="btn-ghost" title="Analyze with AI"><i data-lucide="sparkles"></i> Analyze</button>
+              <button id="btn-delete-entry" class="btn-danger" title="Move to Trash"><i data-lucide="trash-2"></i></button>
             </div>
           </header>
           <div class="editor-body">
@@ -88,7 +88,7 @@
                   <option value="inbox">Inbox</option>
                 </select>
                 <button id="btn-manage-projects" class="btn-ghost btn-sm" title="Manage Projects" type="button">Manage</button>
-                <button id="btn-show-new-project" class="btn-ghost btn-sm" title="Create New Project">＋</button>
+                <button id="btn-show-new-project" class="btn-ghost btn-sm" title="Create New Project"><i data-lucide="plus"></i></button>
               </div>
             </div>
           </div>
@@ -140,7 +140,7 @@
       <aside id="task-detail-panel" class="detail-panel hidden" aria-label="Task Details">
         <header class="panel-header">
           <h3>Task Details</h3>
-          <button id="btn-close-task-detail" class="btn-icon">×</button>
+          <button id="btn-close-task-detail" class="btn-icon" aria-label="Close Task Details"><i data-lucide="x"></i></button>
         </header>
         <div class="panel-content">
           <input type="hidden" id="detail-task-id" />
@@ -200,7 +200,7 @@
               <div class="subtask-empty">No subtasks</div>
             </div>
             <button id="btn-add-subtask" class="btn-ghost btn-sm" type="button">
-              + Add Subtask
+              <i data-lucide="plus"></i> Add Subtask
             </button>
           </div>
           <div class="form-row">
@@ -238,7 +238,7 @@
               <div class="attachment-empty">No attachments</div>
             </div>
             <button id="btn-add-attachment" class="btn-ghost btn-sm" type="button">
-              📎 Add File
+              <i data-lucide="paperclip"></i> Add File
             </button>
           </div>
         </div>
@@ -251,14 +251,24 @@
     <div id="tab-ai" class="tab-view">
       <div class="ai-tab-layout">
         <aside class="ai-history-sidebar" aria-label="Conversation History">
-          <header>
-            <h3>Conversations</h3>
-            <button id="btn-new-chat" class="btn-ghost btn-sm" title="Start New Chat">＋</button>
-          </header>
-          <div id="ai-conversation-list" class="conversation-list">
-            <!-- Loaded via ai.js -->
-            <div class="list-empty">No conversations</div>
-          </div>
+          <section class="ai-pinned-section">
+            <header>
+              <h3>Pinned Facts</h3>
+              <button id="btn-add-pinned-fact" class="btn-ghost btn-sm" title="Add Pinned Fact"><i data-lucide="plus"></i></button>
+            </header>
+            <div id="ai-pinned-fact-list" class="pinned-fact-list">
+              <div class="list-empty">No pinned facts</div>
+            </div>
+          </section>
+          <section class="ai-conversations-section">
+            <header>
+              <h3>Conversations</h3>
+              <button id="btn-new-chat" class="btn-ghost btn-sm" title="Start New Chat"><i data-lucide="plus"></i></button>
+            </header>
+            <div id="ai-conversation-list" class="conversation-list">
+              <div class="list-empty">No conversations</div>
+            </div>
+          </section>
         </aside>
         <div class="ai-chat-container">
           <div id="ai-tab-messages" class="ai-chat-messages">
@@ -268,7 +278,7 @@
             </div>
           </div>
           <div class="chat-input-area">
-            <textarea id="ai-tab-input" placeholder="Message your partner..."></textarea>
+            <textarea id="ai-tab-input" class="ai-chat-input-field" placeholder="Message your partner..."></textarea>
             <button id="btn-ai-send" class="btn-primary" title="Send Message">Send</button>
           </div>
         </div>
@@ -284,7 +294,7 @@
               <option value="30">Last 30 Days</option>
               <option value="90">Last 90 Days</option>
             </select>
-            <button id="btn-refresh-reports" class="btn-ghost" title="Refresh Reports">↻ Refresh</button>
+            <button id="btn-refresh-reports" class="btn-ghost" title="Refresh Reports"><i data-lucide="refresh-cw"></i> Refresh</button>
           </div>
         </header>
         <div class="reports-grid">
@@ -382,6 +392,10 @@
               <label for="setting-ai-context-window">Context Window</label>
               <input type="number" id="setting-ai-context-window" min="1024" step="1024" />
             </div>
+            <div class="form-group checkbox-row">
+              <label for="setting-ai-nudge-enabled">Enable Proactive Nudges</label>
+              <input type="checkbox" id="setting-ai-nudge-enabled" />
+            </div>
           </section>
 
           <section class="settings-card">
@@ -398,6 +412,46 @@
               <input type="checkbox" id="setting-terminal-visible" />
             </div>
             <p class="settings-note">Theme changes apply immediately. Terminal visibility is saved for later terminal UI work.</p>
+          </section>
+
+          <section class="settings-card">
+            <h3>Database</h3>
+            <div class="form-group">
+              <label for="setting-db-path">Database Path</label>
+              <input type="text" id="setting-db-path" readonly value="Loading..." placeholder="Path to sqlite file" />
+            </div>
+            <div class="settings-actions">
+              <button id="btn-db-backup" class="btn-secondary">Perform Backup</button>
+              <button id="btn-db-export" class="btn-secondary">Export JSON</button>
+              <button id="btn-db-empty-trash" class="btn-outline">Empty Trash</button>
+              <button id="btn-db-reset" class="btn-danger">Reset All Data</button>
+            </div>
+            <p class="settings-note">Backups are stored in your application data directory. Resetting is permanent.</p>
+          </section>
+
+          <section class="settings-card full-width">
+            <div class="card-header">
+              <h3>System Visibility</h3>
+              <div class="header-actions">
+                <span id="ai-queue-badge" class="badge">AI Queue: 0</span>
+                <button id="btn-refresh-audit" class="btn-icon" aria-label="Refresh Audit Log"><i data-lucide="refresh-cw"></i></button>
+              </div>
+            </div>
+            <div class="audit-log-container">
+              <table id="audit-log-table">
+                <thead>
+                  <tr>
+                    <th>Action</th>
+                    <th>Entity</th>
+                    <th>Actor</th>
+                    <th>Time</th>
+                  </tr>
+                </thead>
+                <tbody id="audit-log-body">
+                  <tr><td colspan="4">Loading system logs...</td></tr>
+                </tbody>
+              </table>
+            </div>
           </section>
         </div>
       </div>
@@ -416,14 +470,23 @@
     </div>
   </aside>
 
+  <script src="assets/libs/chart.umd.min.js"></script>
+  <script src="assets/libs/marked.min.js"></script>
+  <script src="assets/libs/lucide.min.js"></script>
   <script type="module" src="js/app.js"></script>
+  <!-- Initialize Lucide icons after DOM is ready (non-module, runs after module scripts) -->
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      if (globalThis.lucide) { lucide.createIcons(); }
+    });
+  </script>
 
   <!-- Modals -->
   <div id="modal-project" class="modal-overlay hidden">
     <div class="modal-content">
       <header class="modal-header">
         <h3>New Project</h3>
-        <button class="btn-icon" data-modal-close>×</button>
+        <button class="btn-icon" data-modal-close aria-label="Close"><i data-lucide="x"></i></button>
       </header>
       <div class="modal-body">
         <input type="hidden" id="edit-project-id" />
@@ -456,16 +519,16 @@
           </div>
         </div>
         <div class="form-group">
-          <label>Existing Projects</label>
+          <strong>Existing Projects</strong>
           <div id="project-management-list" class="project-management-list">
             <div class="list-empty">No projects</div>
           </div>
         </div>
       </div>
       <div class="modal-footer">
-        <button id="btn-delete-project" class="btn-danger" type="button">Delete Project</button>
-        <button class="btn-ghost" data-modal-close>Cancel</button>
-        <button id="btn-create-project-save" class="btn-primary">Save Project</button>
+        <button id="btn-delete-project" class="btn-danger" type="button"><i data-lucide="trash-2"></i> Delete Project</button>
+        <button class="btn-ghost" data-modal-close><i data-lucide="x"></i> Cancel</button>
+        <button id="btn-create-project-save" class="btn-primary"><i data-lucide="save"></i> Save Project</button>
       </div>
     </div>
   </div>

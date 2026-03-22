@@ -25,6 +25,7 @@ pub fn initialise() -> Result<Connection, AppError> {
 
     migrations::run_pending(&mut conn)?;
     settings::seed_defaults(&conn)?;
+    crate::db::ai::seed_system_conversations(&conn)?;
 
     println!("[DB] Initialised at {:?}", db_path);
     Ok(conn)

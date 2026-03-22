@@ -30,6 +30,9 @@ pub fn create_project(conn: &Connection, project: &Project) -> Result<String, Ap
             project.updated_at,
         ],
     )?;
+
+    super::audit::log_action(conn, "create", "project", &project.id, "user", None, None)?;
+
     Ok(project.id.clone())
 }
 
@@ -104,6 +107,8 @@ pub fn update_project(conn: &Connection, project: &Project) -> Result<(), AppErr
         params![project.name, project.updated_at, project.id],
     )?;
 
+    super::audit::log_action(conn, "update", "project", &project.id, "user", None, None)?;
+
     Ok(())
 }
 
@@ -129,6 +134,10 @@ pub fn soft_delete_project(
         "UPDATE projects SET is_deleted = 1, updated_at = ?1 WHERE id = ?2 AND is_deleted = 0",
         params![updated_at, id],
     )?;
+
+    if rows > 0 {
+        super::audit::log_action(conn, "delete", "project", id, "user", None, None)?;
+    }
 
     Ok(rows > 0)
 }

@@ -1,0 +1,90 @@
+warning: variants `LogEvent`, `StartupComplete`, and `AiModelMissing` are never constructed
+  --> src\events.rs:7:5
+   |
+ 6 | pub enum AppEvent {
+   |          -------- variants in this enum
+ 7 |     LogEvent {
+   |     ^^^^^^^^
+...
+13 |     StartupComplete,
+   |     ^^^^^^^^^^^^^^^
+...
+87 |     AiModelMissing {
+   |     ^^^^^^^^^^^^^^
+   |
+   = note: `AppEvent` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `init` is never used
+ --> src\logger.rs:2:8
+  |
+2 | pub fn init() {
+  |        ^^^^
+
+warning: `hawkward-journal-ai` (lib) generated 2 warnings
+warning: `hawkward-journal-ai` (lib test) generated 2 warnings (2 duplicates)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.58s
+     Running unittests src\lib.rs (target\debug\deps\hawkward_journal_ai_lib-4d9cc8dd0a160e27.exe)
+
+running 39 tests
+test ai::tests::fills_missing_mood_from_emotions_or_default ... ok
+test ai::companion::tests::format_draft_context_returns_none_for_blank_draft ... ok
+test ai::analysis::tests::test_should_analyze_deduplication ... ok
+test ai::analysis::tests::test_queue_flood_limit ... ok
+test ai::memory::tests::top_repeated_strings_returns_ranked_values ... ok
+test ai::memory::tests::truncate_for_prompt_appends_ellipsis_when_needed ... ok
+test ai::analysis::tests::test_should_analyze_on_content_change ... ok
+test ai::tests::fills_missing_summary_from_insight ... ok
+test ai::tests::fills_missing_summary_from_source_text ... ok
+test ai::tools::tests::create_task_validation_rejects_blank_title ... ok
+test ai::tools::tests::list_tasks_validation_rejects_invalid_dates ... ok
+test ai::tools::tests::search_journal_validation_rejects_short_query ... ok
+test ai::tools::tests::normalize_readonly_tool_args_accepts_empty_array_as_empty_object ... ok
+test ai::tools::tests::strip_blank_optional_strings_removes_empty_values ... ok
+test ai::tools::tests::task_reference_validation_allows_human_phrases ... ok
+test ai::tools::tests::update_task_validation_requires_fields_to_change ... ok
+test ai::tools::tests::truncate_url_shortens_long_values ... ok
+test ai::tools::tests::validate_url_allows_public_https ... ok
+test ai::tools::tests::validate_url_blocks_localhost ... ok
+test ai::prompt::tests::weekly_plan_prompt_mentions_realistic_tradeoffs ... ok
+test db::journal::tests::test_merge_analysis_data_preserves_existing ... ok
+test ai::prompt::tests::chat_prompt_includes_companion_identity_rules ... ok
+test ai::prompt::tests::prompt_renders_memory_blocks_when_present ... ok
+test db::migrations::tests::strip_outer_transaction_keeps_trigger_begin_block ... ok
+test db::migrations::tests::strip_outer_transaction_removes_begin_and_commit_lines ... ok
+test ai::companion::tests::reflection_history_round_trip_loads_recent_prompts ... ok
+test ai::companion::tests::history_round_trip_filters_to_current_week ... ok
+test db::audit::tests::test_audit_logging_and_retrieval ... ok
+test scheduler::weekly_report::tests::has_review_run_this_week_returns_false_for_invalid_date ... ok
+test scheduler::weekly_report::tests::has_review_run_this_week_returns_false_without_setting ... ok
+test ai::memory::tests::build_prompt_memory_handles_empty_database ... FAILED
+test ai::memory::tests::build_prompt_memory_collects_semantic_and_entry_context ... FAILED
+test scheduler::weekly_report::tests::has_review_run_this_week_returns_true_for_current_week ... ok
+test ai::companion::tests::decide_proactive_nudge_prefers_reengagement_on_app_open ... ok
+test ai::companion::tests::decide_proactive_nudge_uses_open_loop_for_blank_entry ... ok
+test backup::manual::tests::test_perform_backup_creates_file ... ok
+test db::migrations::tests::run_pending_applies_all_migrations_in_memory ... ok
+test backup::export::tests::test_export_to_json_creates_file ... ok
+test db::migrations::tests::reset_database_wipes_and_restores_schema ... ok
+
+failures:
+
+---- ai::memory::tests::build_prompt_memory_handles_empty_database stdout ----
+
+thread 'ai::memory::tests::build_prompt_memory_handles_empty_database' (4976) panicked at src\ai\memory.rs:581:55:
+called `Result::unwrap()` on an `Err` value: Database("no such table: ai_pinned_memory")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- ai::memory::tests::build_prompt_memory_collects_semantic_and_entry_context stdout ----
+
+thread 'ai::memory::tests::build_prompt_memory_collects_semantic_and_entry_context' (9116) panicked at src\ai\memory.rs:544:66:
+called `Result::unwrap()` on an `Err` value: Database("no such table: ai_pinned_memory")
+
+
+failures:
+    ai::memory::tests::build_prompt_memory_collects_semantic_and_entry_context
+    ai::memory::tests::build_prompt_memory_handles_empty_database
+
+test result: FAILED. 37 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.04s
+
+error: test failed, to rerun pass `--lib`

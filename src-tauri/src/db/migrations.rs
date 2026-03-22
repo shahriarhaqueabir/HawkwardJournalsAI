@@ -20,9 +20,19 @@ const MIGRATIONS: &[Migration] = &[
         sql: include_str!("../../migrations/002_fts_triggers.sql"),
     },
     Migration {
+        version: 3,
+        name: "analysis_tracking",
+        sql: include_str!("../../migrations/003_analysis_tracking.sql"),
+    },
+    Migration {
         version: 4,
         name: "project_hierarchy",
         sql: include_str!("../../migrations/004_field_expansion.sql"),
+    },
+    Migration {
+        version: 5,
+        name: "settings_v16",
+        sql: include_str!("../../migrations/005_settings_v16.sql"),
     },
     Migration {
         version: 7,
@@ -33,6 +43,16 @@ const MIGRATIONS: &[Migration] = &[
         version: 8,
         name: "ai_analysis_fields",
         sql: include_str!("../../migrations/008_ai_analysis_fields.sql"),
+    },
+    Migration {
+        version: 9,
+        name: "fix_proposed_outcome",
+        sql: include_str!("../../migrations/009_fix_proposed_outcome.sql"),
+    },
+    Migration {
+        version: 10,
+        name: "ai_pinned_memory",
+        sql: include_str!("../../migrations/010_ai_pinned_memory.sql"),
     },
 ];
 
@@ -122,6 +142,36 @@ pub fn run_pending(conn: &mut Connection) -> Result<(), AppError> {
     Ok(())
 }
 
+pub fn reset_database(conn: &mut Connection) -> Result<(), AppError> {
+    // 1. Get all table names (excluding sqlite_ sequences)
+    let table_names: Vec<String> = {
+        let mut stmt = conn.prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        )?;
+        let names = stmt
+            .query_map([], |row| row.get::<_, String>(0))?
+            .filter_map(|name| name.ok())
+            .collect();
+        names
+    };
+
+    // 2. Disable foreign keys temporarily to drop tables reliably
+    conn.execute("PRAGMA foreign_keys = OFF", [])?;
+
+    // 3. Drop all tables
+    for table in table_names {
+        conn.execute(&format!("DROP TABLE IF EXISTS \"{}\"", table), [])?;
+    }
+
+    // 4. Re-enable foreign keys
+    conn.execute("PRAGMA foreign_keys = ON", [])?;
+
+    // 5. Re-run migrations
+    run_pending(conn)?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -168,5 +218,31 @@ COMMIT;
             })
             .unwrap();
         assert_eq!(applied_count, MIGRATIONS.len() as i64);
+    }
+
+    #[test]
+    fn reset_database_wipes_and_restores_schema() {
+        let mut conn = Connection::open_in_memory().unwrap();
+        run_pending(&mut conn).unwrap();
+
+        // Add some dummy data
+        conn.execute("INSERT INTO notebooks (id, name, created_at, updated_at) VALUES ('test', 'Test', '2023-01-01', '2023-01-01')", []).unwrap();
+
+        // Reset
+        reset_database(&mut conn).unwrap();
+
+        // Check if dummy data is gone
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM notebooks", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 0);
+
+        // Check if schema is still there (migrations re-applied)
+        let migration_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM schema_migrations", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(migration_count, MIGRATIONS.len() as i64);
     }
 }

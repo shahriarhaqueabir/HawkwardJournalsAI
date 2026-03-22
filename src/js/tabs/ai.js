@@ -7,6 +7,7 @@ export async function initAiChat() {
     const btnSend = document.getElementById("btn-ai-send");
     const input = document.getElementById("ai-tab-input");
     const btnNew = document.getElementById("btn-new-chat");
+    const btnAddPinned = document.getElementById("btn-add-pinned-fact");
 
     if (btnSend) {
         btnSend.addEventListener("click", sendMessage);
@@ -25,12 +26,73 @@ export async function initAiChat() {
         btnNew.addEventListener("click", startNewChat);
     }
 
+    if (btnAddPinned) {
+        btnAddPinned.addEventListener("click", promptAddPinnedFact);
+    }
+
     // Initial load
     await loadConversations();
+    await loadPinnedFacts();
 
     // Register global event handler for AI Chat
     globalThis.__AI_CHAT_HANDLER__ = handleAiEvent;
 }
+
+async function loadPinnedFacts() {
+    const list = document.getElementById("ai-pinned-fact-list");
+    if (!list) return;
+
+    try {
+        const facts = await invoke("ai_list_pinned_memory");
+        renderPinnedFacts(facts);
+    } catch (e) {
+        console.error("Failed to load pinned facts:", e);
+    }
+}
+
+function renderPinnedFacts(facts) {
+    const list = document.getElementById("ai-pinned-fact-list");
+    if (facts.length === 0) {
+        list.innerHTML = '<div class="list-empty">No pinned facts</div>';
+        return;
+    }
+
+    list.innerHTML = facts.map(f => `
+        <div class="pinned-fact-item importance-${f.importance || 1}" title="Added: ${new Date(f.created_at).toLocaleString()}">
+            <div class="fact-importance"></div>
+            <div class="fact-content">${escapeHtml(f.content)}</div>
+            <div class="fact-delete" onclick="deletePinnedFact('${f.id}')">×</div>
+        </div>
+    `).join("");
+}
+
+async function promptAddPinnedFact() {
+    const content = prompt("Enter a fact for the AI to remember (e.g., 'User prefers dark mode', 'User is a developer'):");
+    if (!content) return;
+    
+    try {
+        await invoke("ai_upsert_pinned_memory", { 
+            id: null,
+            content, 
+            importance: 1 
+        });
+        await loadPinnedFacts();
+    } catch (e) {
+        console.error("Failed to add pinned fact:", e);
+        alert("Failed to add fact: " + e);
+    }
+}
+
+globalThis.deletePinnedFact = async (id) => {
+    if (!confirm("Delete this pinned fact?")) return;
+    try {
+        await invoke("ai_delete_pinned_memory", { id });
+        await loadPinnedFacts();
+    } catch (e) {
+        console.error("Failed to delete pinned fact:", e);
+        alert("Failed to delete fact: " + e);
+    }
+};
 
 async function loadConversations() {
     const list = document.getElementById("ai-conversation-list");
@@ -113,7 +175,7 @@ function createMessageBubble(m) {
 }
 
 async function sendMessage() {
-    const input = document.getElementById("ai-tab-input");
+    const input = document.querySelector(".ai-chat-input-field");
     const text = input.value.trim();
     if (!text || isTyping) return;
 
@@ -269,16 +331,20 @@ function updateToolCard(payload) {
     const status = payload.result?.status;
     const isError = status === "error";
     const isCancelled = status === "cancelled" || payload.confirmed === false;
-    const heading = isError
-        ? `Tool Failed: ${payload.name}`
-        : isCancelled
-            ? `Tool Cancelled: ${payload.name}`
-            : `Tool Executed: ${payload.name}`;
-    const message = isError
-        ? escapeHtml(payload.result?.message || "The tool could not complete.")
-        : isCancelled
-            ? escapeHtml(payload.result?.message || "The action was cancelled.")
-            : "Action completed successfully. AI is interpreting the results...";
+    
+    let heading = `Tool Executed: ${payload.name}`;
+    if (isError) {
+        heading = `Tool Failed: ${payload.name}`;
+    } else if (isCancelled) {
+        heading = `Tool Cancelled: ${payload.name}`;
+    }
+
+    let message = "Action completed successfully. AI is interpreting the results...";
+    if (isError) {
+        message = escapeHtml(payload.result?.message || "The tool could not complete.");
+    } else if (isCancelled) {
+        message = escapeHtml(payload.result?.message || "The action was cancelled.");
+    }
 
     if (card) {
         let extraHtml = "";

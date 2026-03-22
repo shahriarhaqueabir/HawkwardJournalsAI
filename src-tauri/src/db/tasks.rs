@@ -56,7 +56,7 @@ pub struct TaskListFilters {
     pub due_after: Option<String>,
 }
 
-pub fn create_task(conn: &Connection, task: &Task) -> Result<String, AppError> {
+pub fn create_task(conn: &Connection, task: &Task) -> Result<Task, AppError> {
     conn.execute(
         "INSERT INTO tasks (
             id, parent_task_id, title, description, status, priority, 
@@ -91,7 +91,18 @@ pub fn create_task(conn: &Connection, task: &Task) -> Result<String, AppError> {
             task.updated_at,
         ],
     )?;
-    Ok(task.id.clone())
+
+    super::audit::log_action(
+        conn,
+        "create",
+        "task",
+        &task.id,
+        if task.ai_created { "ai" } else { "user" },
+        None,
+        task.ai_conversation_id.clone(),
+    )?;
+
+    Ok(task.clone())
 }
 
 pub fn normalize_task_project(conn: &Connection, task: &mut Task) -> Result<(), AppError> {
@@ -287,6 +298,16 @@ pub fn update_task_status(conn: &Connection, id: &str, status: &str) -> Result<(
         return Err(AppError::NotFound("Task not found".into()));
     }
 
+    super::audit::log_action(
+        conn,
+        "update",
+        "task",
+        id,
+        "user",
+        Some(format!("status -> {}", status)),
+        None,
+    )?;
+
     Ok(())
 }
 
@@ -296,6 +317,11 @@ pub fn soft_delete(conn: &Connection, id: &str) -> Result<bool, AppError> {
         "UPDATE tasks SET is_deleted = 1, updated_at = ?1 WHERE id = ?2 OR parent_task_id = ?2",
         params![now, id],
     )?;
+
+    if result > 0 {
+        super::audit::log_action(conn, "delete", "task", id, "user", Some("soft_delete".into()), None)?;
+    }
+
     Ok(result > 0)
 }
 
@@ -386,6 +412,16 @@ pub fn update_task(conn: &Connection, task: &Task) -> Result<(), AppError> {
     if rows == 0 {
         return Err(AppError::NotFound("Task not found".into()));
     }
+
+    super::audit::log_action(
+        conn,
+        "update",
+        "task",
+        &task.id,
+        "user",
+        None,
+        task.ai_conversation_id.clone(),
+    )?;
 
     Ok(())
 }
@@ -715,6 +751,7 @@ use tauri::Manager;
 
 pub async fn execute_ai_tool(
     app: &tauri::AppHandle,
+    conversation_id: Option<String>,
     name: &str,
     args: serde_json::Value,
 ) -> Result<serde_json::Value, AppError> {
@@ -783,6 +820,43 @@ pub async fn execute_ai_tool(
         }
     }
 
+    fn resolve_project_reference(conn: &Connection, raw: &str) -> Result<String, AppError> {
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Ok("inbox".to_string());
+        }
+
+        if trimmed == "inbox" || trimmed == "Inbox" {
+            return Ok("inbox".to_string());
+        }
+
+        // Try UUID
+        if uuid::Uuid::parse_str(trimmed).is_ok() {
+            return Ok(trimmed.to_string());
+        }
+
+        // Search by name
+        let projects = crate::db::projects::list_projects(conn)?;
+        let exact = projects
+            .iter()
+            .find(|p| p.name.eq_ignore_ascii_case(trimmed));
+        if let Some(p) = exact {
+            return Ok(p.id.clone());
+        }
+
+        let partial = projects
+            .iter()
+            .find(|p| p.name.to_lowercase().contains(&trimmed.to_lowercase()));
+        if let Some(p) = partial {
+            return Ok(p.id.clone());
+        }
+
+        Err(AppError::NotFound(format!(
+            "No project found matching '{}'.",
+            trimmed
+        )))
+    }
+
     match name {
         "create_task" => {
             let title = args["title"]
@@ -794,6 +868,12 @@ pub async fn execute_ai_tool(
             let project_id = args["project_id"].as_str().map(|s| s.to_string());
             let energy_level = args["energy_level"].as_str().map(|s| s.to_string());
             let context_tag = args["context_tag"].as_str().map(|s| s.to_string());
+
+            let conn = conn_arc.lock().await;
+            let resolved_proj_id = match project_id {
+                Some(p) => resolve_project_reference(&conn, &p)?,
+                None => "inbox".to_string(),
+            };
 
             let now = Utc::now().to_rfc3339();
             let mut task = Task {
@@ -815,7 +895,7 @@ pub async fn execute_ai_tool(
                 labels: "[]".into(),
                 category: None,
                 project: None,
-                project_id: Some(project_id.unwrap_or_else(|| "inbox".into())),
+                project_id: Some(resolved_proj_id),
                 energy_level,
                 context_tag,
                 linked_url: None,
@@ -823,13 +903,12 @@ pub async fn execute_ai_tool(
                 next_occurrence: None,
                 sort_order: 0,
                 ai_created: true,
-                ai_conversation_id: None,
+                ai_conversation_id: conversation_id.clone(),
                 created_at: now.clone(),
                 updated_at: now,
                 completed_at: None,
             };
 
-            let conn = conn_arc.lock().await;
             normalize_task_project(&conn, &mut task)?;
             create_task(&conn, &task)?;
 
@@ -871,7 +950,12 @@ pub async fn execute_ai_tool(
             if let Some(d) = args["due_date"].as_str() {
                 task.due_date = Some(d.to_string());
             }
+            if let Some(p) = args["project_id"].as_str() {
+                let pid = resolve_project_reference(&conn, p)?;
+                task.project_id = Some(pid);
+            }
 
+            task.ai_conversation_id = conversation_id.clone();
             task.updated_at = Utc::now().to_rfc3339();
             normalize_task_project(&conn, &mut task)?;
             update_task(&conn, &task)?;

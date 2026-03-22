@@ -11,18 +11,12 @@ document.querySelectorAll(".nav-item").forEach((item) => {
   item.addEventListener("click", () => {
     const tab = item.dataset.tab;
     const nextView = document.getElementById(`tab-${tab}`);
-    if (!nextView) {
-      console.warn(`Tab view not found: tab-${tab}`);
-      return;
-    }
+    if (!nextView) return;
 
-    document
-      .querySelectorAll(".nav-item")
-      .forEach((n) => n.classList.remove("active"));
+    document.querySelectorAll(".nav-item").forEach((n) => n.classList.remove("active"));
     item.classList.add("active");
-    document
-      .querySelectorAll(".tab-view")
-      .forEach((v) => v.classList.remove("active"));
+
+    document.querySelectorAll(".tab-view").forEach((v) => v.classList.remove("active"));
     nextView.classList.add("active");
   });
 });
@@ -87,5 +81,5 @@ initAiChat();
 initReports();
 initSettings();
 initAiSidebar();
-checkOllama();
+await checkOllama();
 setInterval(checkOllama, 30000);

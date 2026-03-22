@@ -14,6 +14,7 @@ const REFLECTION_HISTORY_KEY: &str = "companion_reflection_history";
 pub enum ProactiveTrigger {
     AppOpen,
     EmptyEntry,
+    TaskCompleted,
 }
 
 impl ProactiveTrigger {
@@ -21,6 +22,7 @@ impl ProactiveTrigger {
         match value {
             "app_open" => Ok(Self::AppOpen),
             "empty_entry" => Ok(Self::EmptyEntry),
+            "task_completed" => Ok(Self::TaskCompleted),
             _ => Err(AppError::InvalidInput(format!(
                 "Unknown proactive trigger: {}",
                 value
@@ -32,6 +34,7 @@ impl ProactiveTrigger {
         match self {
             Self::AppOpen => "app_open",
             Self::EmptyEntry => "empty_entry",
+            Self::TaskCompleted => "task_completed",
         }
     }
 }
@@ -135,6 +138,30 @@ pub fn decide_proactive_nudge(
                 details: vec!["The user has been idle in a new blank entry for 30 seconds.".into()],
             }))
         }
+        ProactiveTrigger::TaskCompleted => {
+            // Pick the most recently completed task that was older than 3 days
+            let conn_ref = conn;
+            let mut stmt = conn_ref.prepare(
+                "SELECT title, created_at FROM tasks 
+                 WHERE status = 'done' AND is_deleted = 0 
+                 ORDER BY completed_at DESC LIMIT 1"
+            )?;
+            let row = stmt.query_row([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)));
+            
+            if let Ok((title, created_at)) = row {
+                if let Some(created_date) = created_at.get(..10).and_then(|d| NaiveDate::parse_from_str(d, "%Y-%m-%d").ok()) {
+                    let age = (today - created_date).num_days();
+                    if age >= 3 {
+                        return Ok(Some(ProactiveDecision {
+                            trigger,
+                            reason: "task_completion_reflection".into(),
+                            details: vec![format!("Finished '{}' which was open for {} day(s).", title, age)],
+                        }));
+                    }
+                }
+            }
+            Ok(None)
+        }
     }
 }
 
@@ -153,6 +180,7 @@ pub async fn generate_proactive_nudge(
         recent_patterns: memory.recent_patterns,
         related_journal: memory.related_journal,
         current_entry: memory.current_entry,
+        pinned_points: memory.pinned_points,
     };
 
     let mut prompt = format!(
@@ -212,6 +240,7 @@ pub async fn generate_reflection_prompt(
         recent_patterns: memory.recent_patterns,
         related_journal: memory.related_journal,
         current_entry: draft_context.or(memory.current_entry),
+        pinned_points: memory.pinned_points,
     };
 
     let mut prompt = String::from(

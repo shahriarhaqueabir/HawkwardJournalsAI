@@ -106,7 +106,7 @@ All engineering review fixes applied. Four new sections added.
 | D-10 | Journal Streak | **Reports only** |
 | D-11 | Task Fields | **All four field groups** |
 | D-12 | Task Default View | **Calendar / Agenda** |
-| D-13 | Task Project Field | **Text field only** |
+| D-13 | Task Project Field | **First-class entity (table)** — includes ID, name, colour, goal date |
 | D-14 | Task Recurrence | **Fixed schedule** (D-39) |
 | D-15 | Reports Output | **On-screen + PDF + Markdown** |
 | D-16 | Weekly Review | **Auto Monday 08:00** |

@@ -1,5 +1,73 @@
 # Changelog
 
+## 2026-03-22
+
+### AI Tool & Reporting Refinement
+
+- **AI Tool Context Association**:
+  - Updated `execute_ai_tool` in `src-tauri/src/db/tasks.rs` and `execute_tool_call` in `src-tauri/src/ai/tools.rs` to accept and persist `ai_conversation_id`.
+  - **AI Task Name Prioritization**: Updated the system prompt in `src-tauri/src/ai/prompt.rs` to prioritize human-readable task titles and project names over raw UUIDs or ID prefixes in AI responses.
+  - **Project Name Resolution**: Enhanced `execute_ai_tool` in `src-tauri/src/db/tasks.rs` with `resolve_project_reference`, allowing the AI to understand and link tasks to projects using their names (e.g., "Work") instead of requiring UUIDs.
+  - Wired `ai_chat` in `src-tauri/src/lib.rs` to pass the correct `conversation_id` through both structured and fallback tool execution paths.
+  - Aligned AI-generated task creation and updates with their source conversation for better traceability.
+- **Reporting UI Finalization**:
+  - Implemented full analytical dashboard in `src/js/tabs/reports.js` with 11 specialized chart/metric types.
+  - Added support for: Productivity (Created vs Completed), Journal Consistency (Entries/Words), Emotion/Mood distribution, Project Health, Energy levels, Time Allocation, Task Status, and Due-Date Buckets.
+  - Implemented high-fidelity SVG fallbacks for every chart type to ensure premium aesthetics without external dependencies.
+- **Frontend AI Sidebar Hardening**:
+  - Added event listeners for `ai_tool_pending`, `ai_tool_result`, and `ai_confirm_timeout` in `src/js/ai-sidebar.js`.
+  - Implemented interactive tool confirmation cards and timeout handling in the sidebar UI.
+- **Bug Fixes**:
+  - Resolved a startup crash caused by redundant `ALTER TABLE` statements in Migration 006. Migration 006 has been removed as its functionality is redundant to Migration 004.
+  - Fixed a database constraint error in `proposed_task_log` by adding Migration 009, which adds the `'proposed'` status to the `outcome` check constraint.
+  - Corrected `save_analysis_result` to log valid status `"proposed"` and actual task titles instead of generic strings.
+- **Verification**:
+  - `cargo check` (Passed)
+  - `node --check src/js/ai-sidebar.js` (Passed)
+  - `node --check src/js/tabs/reports.js` (Passed)
+  - **Comprehensive Backend Testing**: Implemented and verified 39 unit tests across `db`, `ai`, `backup`, and `scheduler` modules with a 100% pass rate.
+
+- **Infrastructure & Visibility**:
+  - **Global Event-Driven Logging**: Expanded `src-tauri/src/logger.rs` into a full `tracing` provider that emits `LogEvent` Tauri events for real-time frontend visibility.
+  - **Lifecycle Integration**: Wired `logger::init()` and `AppHandle` registration into `src-tauri/src/lib.rs`.
+  - **AI Memory Schema Alignment**: Fixed missing `ai_pinned_memory` table in `ai/memory.rs` test setup.
+  - **Bug Fixes**: Resolved borrow checker error (`E0502`) in database reset flow and corrected AI prompt renderer to align with verification tests.
+
+
+## 2026-03-21
+
+### AI & Data Engine Hardening
+
+- **Generous AI Token Limits**:
+  - Increased AI context window (`num_ctx`) to **32,768 tokens** across all pipelines.
+  - Expanded journal analysis content truncation to **25,000 characters** and web fetch truncation to **15,000 characters**.
+  - Aligned frontend `settings.js` defaults with the new context window spec.
+- **Mutation Auditing System**:
+  - Implemented a comprehensive `audit_log` system in `src-tauri/src/db/audit.rs`.
+  - Integrated auditing into all journal, task, and project mutations, including AI attribution and conversation linking.
+- **Trash Management**:
+  - Added native soft-delete management with `trash_list` and `trash_empty` Tauri commands.
+  - Implemented `src-tauri/src/db/trash.rs` to aggregate deleted items across the database.
+- **Keyword Cloud Analytics**:
+  - Implemented high-performance SQL-based keyword aggregation in `src-tauri/src/db/reports.rs` using `json_each`.
+  - Exposed keyword stats to the analytical dashboard.
+
+### Frontend Audit & Alignment
+
+- **Comprehensive Frontend Audit**:
+  - Conducted a full audit of the styles, CSS, and JS logic.
+  - Verified Tauri v2 IPC naming compliance and single-event channel architecture.
+  - Evaluated aesthetic implementation against the "Premium WOW" spec, identifying areas for glassmorphism and transition upgrades.
+  - Identified missing vendored libraries in `src/assets/libs`.
+- **Consistency Fixes**:
+  - Updated `create_task` to return the full Task object as per Spec §8A.
+  - Resolved settings mismatches between frontend defaults and backend expanded limits.
+
+- **Verification**:
+  - `cargo check` (Passed)
+  - `node --check src/js/app.js` (Passed)
+
+
 ## 2026-03-20
 
 ### Documentation Refresh For Current Progress

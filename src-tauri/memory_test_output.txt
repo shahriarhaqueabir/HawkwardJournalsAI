@@ -1,0 +1,54 @@
+warning: variants `LogEvent`, `StartupComplete`, and `AiModelMissing` are never constructed
+  --> src\events.rs:7:5
+   |
+ 6 | pub enum AppEvent {
+   |          -------- variants in this enum
+ 7 |     LogEvent {
+   |     ^^^^^^^^
+...
+13 |     StartupComplete,
+   |     ^^^^^^^^^^^^^^^
+...
+87 |     AiModelMissing {
+   |     ^^^^^^^^^^^^^^
+   |
+   = note: `AppEvent` has a derived impl for the trait `Clone`, but this is intentionally ignored during dead code analysis
+   = note: `#[warn(dead_code)]` (part of `#[warn(unused)]`) on by default
+
+warning: function `init` is never used
+ --> src\logger.rs:2:8
+  |
+2 | pub fn init() {
+  |        ^^^^
+
+warning: `hawkward-journal-ai` (lib test) generated 2 warnings
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 0.55s
+     Running unittests src\lib.rs (target\debug\deps\hawkward_journal_ai_lib-4d9cc8dd0a160e27.exe)
+
+running 4 tests
+test ai::memory::tests::top_repeated_strings_returns_ranked_values ... ok
+test ai::memory::tests::truncate_for_prompt_appends_ellipsis_when_needed ... ok
+test ai::memory::tests::build_prompt_memory_handles_empty_database ... FAILED
+test ai::memory::tests::build_prompt_memory_collects_semantic_and_entry_context ... FAILED
+
+failures:
+
+---- ai::memory::tests::build_prompt_memory_handles_empty_database stdout ----
+
+thread 'ai::memory::tests::build_prompt_memory_handles_empty_database' (17240) panicked at src\ai\memory.rs:587:55:
+called `Result::unwrap()` on an `Err` value: Database("no such column: importance in SELECT id, content, importance, metadata, created_at, updated_at\n         FROM ai_pinned_memory ORDER BY importance DESC, created_at DESC at offset 20")
+note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
+
+---- ai::memory::tests::build_prompt_memory_collects_semantic_and_entry_context stdout ----
+
+thread 'ai::memory::tests::build_prompt_memory_collects_semantic_and_entry_context' (10256) panicked at src\ai\memory.rs:550:66:
+called `Result::unwrap()` on an `Err` value: Database("no such column: importance in SELECT id, content, importance, metadata, created_at, updated_at\n         FROM ai_pinned_memory ORDER BY importance DESC, created_at DESC at offset 20")
+
+
+failures:
+    ai::memory::tests::build_prompt_memory_collects_semantic_and_entry_context
+    ai::memory::tests::build_prompt_memory_handles_empty_database
+
+test result: FAILED. 2 passed; 2 failed; 0 ignored; 0 measured; 35 filtered out; finished in 0.01s
+
+error: test failed, to rerun pass `--lib`

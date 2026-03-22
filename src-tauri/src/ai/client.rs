@@ -1,10 +1,14 @@
-use crate::ai::{AnalysisResult, RawAnalysis};
+use crate::ai::{tokens, AnalysisResult, RawAnalysis};
 use crate::error::AppError;
 use futures_util::StreamExt;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::time::Duration;
+
+/// Maximum tokens for journal analysis input (reserves 4096 for response).
+/// Separate from chat context (D-93: 16384 default).
+pub const MAX_ANALYSIS_TOKENS: usize = 12_288;
 
 pub const DEFAULT_MODEL: &str = "llama3.2";
 pub const OLLAMA_GENERATE_URL: &str = "api/generate";
@@ -78,7 +82,14 @@ impl OllamaClient {
         content: &str,
         id: String,
     ) -> Result<AnalysisResult, AppError> {
-        let safe_content = truncate_content(content);
+        let (safe_content, token_count) = tokens::truncate_to_token_budget(content, MAX_ANALYSIS_TOKENS);
+        tracing::info!(
+            "[TokenBudget] analysis entry={} tokens={}/{} truncated={}",
+            id,
+            token_count,
+            MAX_ANALYSIS_TOKENS,
+            token_count < tokens::count_tokens(content)
+        );
         let url = format!("{}/{}", self.base_url, OLLAMA_GENERATE_URL);
 
         // Retry (cold start protection)
@@ -86,7 +97,7 @@ impl OllamaClient {
             match self.try_request(&safe_content, id.clone(), &url).await {
                 Ok(res) => return Ok(res),
                 Err(_e) if attempt == 0 => {
-                    println!(
+                    tracing::warn!(
                         "[AI] Cold start or transient failure, retrying analysis for {}...",
                         id
                     );
@@ -118,7 +129,7 @@ impl OllamaClient {
                 "format": "json",
                 "options": {
                     "temperature": 0.2,
-                    "num_ctx": 16384
+                    "num_ctx": 32768
                 }
             }))
             .send()
@@ -174,6 +185,26 @@ impl OllamaClient {
     > {
         let url = format!("{}/{}", self.base_url, OLLAMA_CHAT_URL);
 
+        // Log token budget before streaming
+        let msg_pairs: Vec<(&str, &str)> = messages
+            .iter()
+            .map(|m| (m.role.as_str(), m.content.as_str()))
+            .collect();
+        let budget = tokens::TokenBudget::for_chat(&msg_pairs, tokens::DEFAULT_CONTEXT_TOKENS);
+        tracing::info!(
+            "[TokenBudget] chat_stream messages={} tokens={}/{} ({:.1}%)",
+            messages.len(),
+            budget.used,
+            budget.context_window,
+            budget.percent_used
+        );
+        if !budget.within_budget {
+            tracing::warn!(
+                "[TokenBudget] chat_stream EXCEEDS budget by {} tokens — Ollama may truncate",
+                budget.used.saturating_sub(budget.max_input)
+            );
+        }
+
         let request = ChatRequest {
             model: self.model.clone(),
             messages,
@@ -181,7 +212,7 @@ impl OllamaClient {
             tools,
             options: json!({
                 "temperature": 0.7,
-                "num_ctx": 16384
+                "num_ctx": 32768
             }),
         };
 
@@ -247,6 +278,7 @@ impl OllamaClient {
             recent_patterns: vec![],
             related_journal: vec![],
             current_entry: None,
+            pinned_points: vec![],
         };
 
         self.chat_single_with_input(prompt, input).await
@@ -260,6 +292,14 @@ impl OllamaClient {
         let url = format!("{}/{}", self.base_url, OLLAMA_CHAT_URL);
 
         let system_prompt = crate::ai::prompt::build_system_prompt(&input);
+
+        // Log token budget before non-streaming call
+        let budget = tokens::TokenBudget::calculate(&system_prompt, tokens::DEFAULT_CONTEXT_TOKENS);
+        tracing::info!(
+            "[TokenBudget] chat_single system_prompt={} tokens ({:.1}% of context)",
+            budget.used,
+            budget.percent_used
+        );
 
         let request = ChatRequest {
             model: self.model.clone(),
@@ -279,7 +319,7 @@ impl OllamaClient {
             tools: None,
             options: json!({
                 "temperature": 0.7,
-                "num_ctx": 16384
+                "num_ctx": 32768
             }),
         };
 
@@ -313,18 +353,9 @@ impl OllamaClient {
     }
 }
 
+/// Token-aware content truncation. Replaces the old character-based truncator.
+/// Delegates to `tokens::truncate_to_token_budget` and returns only the string.
+#[allow(dead_code)]
 fn truncate_content(content: &str) -> String {
-    if content.len() <= 4000 {
-        return content.to_string();
-    }
-    let head: String = content.chars().take(2000).collect();
-    let tail: String = content
-        .chars()
-        .rev()
-        .take(2000)
-        .collect::<String>()
-        .chars()
-        .rev()
-        .collect();
-    format!("{}\n...\n{}", head, tail)
+    tokens::truncate_to_token_budget(content, MAX_ANALYSIS_TOKENS).0
 }
