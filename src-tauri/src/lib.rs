@@ -17,6 +17,7 @@ use uuid::Uuid;
 
 pub struct AppState {
     pub conn: Arc<Mutex<Connection>>,
+    pub graph: Arc<Mutex<graphqlite::Graph>>,
     pub data_dir: std::path::PathBuf,
     pub ai_state: Arc<ai::analysis::AnalysisState>,
     pub ollama: Arc<ai::client::OllamaClient>,
@@ -105,6 +106,7 @@ async fn task_create(
         due_date,
         due_time: None,
         reminder_at: None,
+        reminder_fired: false,
         time_estimate: None,
         time_logged: 0,
         tags: "[]".into(),
@@ -115,12 +117,23 @@ async fn task_create(
         context_tag: None,
         linked_url: None,
         ai_created: false,
+        is_blocked: false,
         created_at: now.clone(),
         updated_at: now,
         completed_at: None,
     };
 
     let conn = state.conn.lock().await;
+
+    // Enforce 2-level nesting limit (D-40)
+    if let Some(ref pid) = parent_task_id {
+        if let Some(parent) = db::tasks::get_task(&conn, pid)? {
+            if parent.parent_task_id.is_some() {
+                return Err(AppError::Database("Subtask depth limit exceeded (max 2 levels)".into()));
+            }
+        }
+    }
+
     db::tasks::create_task(&conn, &task)
 }
 
@@ -180,6 +193,48 @@ async fn task_delete(
 }
 
 #[tauri::command]
+async fn task_add_dependency(
+    state: tauri::State<'_, AppState>,
+    blocked_id: String,
+    blocking_id: String,
+) -> Result<(), AppError> {
+    let conn = state.conn.lock().await;
+    db::tasks::add_dependency(&conn, &blocked_id, &blocking_id)
+}
+
+#[tauri::command]
+async fn task_remove_dependency(
+    state: tauri::State<'_, AppState>,
+    blocked_id: String,
+    blocking_id: String,
+) -> Result<(), AppError> {
+    let conn = state.conn.lock().await;
+    db::tasks::remove_dependency(&conn, &blocked_id, &blocking_id)
+}
+
+#[tauri::command]
+async fn task_get_dependencies(
+    state: tauri::State<'_, AppState>,
+    task_id: String,
+) -> Result<Vec<db::tasks::Task>, AppError> {
+    let conn = state.conn.lock().await;
+    db::tasks::get_dependencies(&conn, &task_id)
+}
+
+#[tauri::command]
+async fn graph_query(
+    state: tauri::State<'_, AppState>,
+    cypher: String,
+) -> Result<serde_json::Value, AppError> {
+    let graph = state.graph.lock().await;
+    let results = graph.query(&cypher)
+        .map_err(|e| AppError::AiError(format!("Graph Query Error: {}", e)))?;
+    
+    // Convert results to JSON
+    Ok(serde_json::to_value(results).unwrap_or(serde_json::Value::Null))
+}
+
+#[tauri::command]
 async fn ollama_health_check() -> Result<bool, AppError> {
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(3))
@@ -195,13 +250,16 @@ async fn ollama_health_check() -> Result<bool, AppError> {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let data_dir = resolve_data_dir();
+    let db_path = data_dir.join("hawkward.db");
     let conn = db::init::initialise().expect("Failed to initialise database");
+    let graph = graphqlite::Graph::open(&db_path).expect("Failed to initialise graph database");
 
     let ollama_client = Arc::new(ai::client::OllamaClient::new("llama3.2".into()));
     let ai_state = Arc::new(ai::analysis::AnalysisState::new());
 
     let app_state = AppState {
         conn: Arc::new(Mutex::new(conn)),
+        graph: Arc::new(Mutex::new(graph)),
         data_dir,
         ai_state,
         ollama: ollama_client,
@@ -217,8 +275,25 @@ pub fn run() {
             Some(vec![]),
         ))
         .manage(app_state)
+        .invoke_handler(tauri::generate_handler![
+            task_create,
+            task_list,
+            task_update_status,
+            task_get,
+            task_update,
+            task_search,
+            task_delete,
+            task_add_dependency,
+            task_remove_dependency,
+            task_get_dependencies,
+            graph_query,
+            ollama_health_check
+        ])
         .setup(|app| {
             let handle = app.handle().clone();
+            
+            // Start Schedulers
+            crate::scheduler::reminders::spawn_reminder_worker(handle.clone());
             
             // WORKER LOOP (Step 4 & 5)
             let worker_handle = handle.clone();
@@ -262,6 +337,17 @@ pub fn run() {
                                     // 5. Call Ollama (Dropped lock above)
                                     match state.ollama.analyze_journal(&entry.content, id.clone()).await {
                                         Ok(result) => {
+                                            // 5.5 Update Knowledge Graph
+                                            {
+                                                let graph = state.graph.lock().await;
+                                                for (s, p, o) in &result.triplets {
+                                                    // Simple upsert of entities and their relationship
+                                                    let _ = graph.upsert_node(s, Vec::<(String, String)>::new(), "Entity");
+                                                    let _ = graph.upsert_node(o, Vec::<(String, String)>::new(), "Entity");
+                                                    let _ = graph.upsert_edge(s, o, Vec::<(String, String)>::new(), p);
+                                                }
+                                            }
+
                                             // 6. Ghost Entry Check: Verify entry still exists before emitting
                                             let exists = {
                                                 let conn = state.conn.lock().await;
@@ -322,7 +408,12 @@ pub fn run() {
                             // Step 6: Backpressure - Move to back of queue if exists, or add new
                             queue.retain(|existing_id| existing_id != &id_clone);
                             queue.push_back(id_clone.clone());
-                            queued_ids.insert(id_clone);
+                            queued_ids.insert(id_clone.clone());
+
+                            // Emit back to frontend so UI can show "Queued" status
+                            crate::events::emit(&task_handle, crate::events::AppEvent::JournalAnalysisQueued { 
+                                entry_id: id_clone 
+                            });
                         });
                     }
                 }
@@ -336,6 +427,7 @@ pub fn run() {
             journal_get,
             journal_list,
             journal_delete,
+            graph_query,
             task_create,
             task_list,
             task_update_status,

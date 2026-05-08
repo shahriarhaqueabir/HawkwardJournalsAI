@@ -15,59 +15,92 @@ export function initJournal() {
     return;
   }
 
+  // State for Keyset Pagination (D-104)
+  let entries = [];
+  let lastCursor = null;
+  let isLoading = false;
+  let hasMore = true;
+  const PAGE_SIZE = 30;
+
+  // State for Autosave
   let saveTimeout = null;
   let isSaving = false;
   let pendingSave = false;
   let lastSaved = { id: "", title: "", content: "" };
 
-  // ── REFRESH LIST ────────────────────────────────
+  // ── REFRESH / LOAD LIST ──────────────────────────
   async function refreshList() {
+    entries = [];
+    lastCursor = null;
+    hasMore = true;
+    listEl.innerHTML = "";
+    await loadMore();
+  }
+
+  async function loadMore() {
+    if (isLoading || !hasMore) return;
+    
+    isLoading = true;
     try {
-      const entries = await invoke("journal_list", { limit: 50 });
-      renderList(entries);
+      const result = await invoke("journal_list", { 
+        cursor: lastCursor, 
+        limit: PAGE_SIZE 
+      });
+
+      if (result.length < PAGE_SIZE) {
+        hasMore = false;
+      }
+
+      if (result.length > 0) {
+        lastCursor = result[result.length - 1].created_at;
+        appendToList(result);
+      } else if (entries.length === 0) {
+        listEl.innerHTML = '<div class="entry-list-empty">No entries yet.</div>';
+      }
     } catch (err) {
       console.error("Failed to load journal list:", err);
+    } finally {
+      isLoading = false;
     }
   }
 
-  function renderList(entries) {
-    if (!entries || entries.length === 0) {
-      listEl.innerHTML = '<div class="entry-list-empty">No entries yet.</div>';
-      return;
-    }
+  function appendToList(newEntries) {
+    const fragment = document.createDocumentFragment();
+    
+    newEntries.forEach((entry) => {
+      // Avoid duplicates if any (though keyset should prevent this)
+      if (entries.some(e => e.id === entry.id)) return;
+      entries.push(entry);
 
-    listEl.innerHTML = entries
-      .map((entry) => {
-        const title = entry.title || "Untitled Entry";
-        const date = new Date(entry.created_at).toLocaleDateString(undefined, {
-          month: "short",
-          day: "numeric",
-        });
-        const activeClass = idInput.value === entry.id ? "active" : "";
-        const titleClass = entry.title ? "entry-title" : "entry-title untitled";
+      const item = document.createElement("div");
+      item.className = `entry-item ${idInput.value === entry.id ? "active" : ""}`;
+      item.dataset.id = entry.id;
 
-        return `
-        <div class="entry-item ${activeClass}" data-id="${entry.id}">
-          <div class="${titleClass}">${title}</div>
-          <div class="entry-meta-row">
-            <span class="entry-date">${date}</span>
-            <span class="entry-stats">${entry.word_count} words</span>
-          </div>
+      const title = entry.title || "Untitled Entry";
+      const date = new Date(entry.created_at).toLocaleDateString(undefined, {
+        month: "short",
+        day: "numeric",
+      });
+      const titleClass = entry.title ? "entry-title" : "entry-title untitled";
+
+      item.innerHTML = `
+        <div class="${titleClass}">${title}</div>
+        <div class="entry-meta-row">
+          <span class="entry-date">${date}</span>
+          <span class="entry-stats">${entry.word_count} words</span>
         </div>
       `;
-      })
-      .join("");
 
-    // Add click listeners
-    listEl.querySelectorAll(".entry-item").forEach((item) => {
-      item.addEventListener("click", () => loadEntry(item.dataset.id));
+      item.addEventListener("click", () => loadEntry(entry.id));
+      fragment.appendChild(item);
     });
+
+    listEl.appendChild(fragment);
   }
 
   // ── LOAD ENTRY ──────────────────────────────────
   async function loadEntry(id) {
     if (isSaving) {
-      // Small delay if we are mid-save to avoid race conditions
       setTimeout(() => loadEntry(id), 200);
       return;
     }
@@ -162,15 +195,17 @@ export function initJournal() {
       statusEl.textContent = "Saved at " + new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
       
       if (isNew) {
+        // Re-init the list to show the newest at top
         await refreshList();
       } else {
-        // Just update the item in the list if it exists
+        // Update the item in the list if it exists
         const item = listEl.querySelector(`[data-id="${newId}"]`);
         if (item) {
           const titleEl = item.querySelector(".entry-title");
           titleEl.textContent = title || "Untitled Entry";
           titleEl.className = title ? "entry-title" : "entry-title untitled";
-          item.querySelector(".entry-stats").textContent = `${content.split(/\s+/).filter(Boolean).length} words`;
+          const wordCount = content.trim() ? content.split(/\s+/).length : 0;
+          item.querySelector(".entry-stats").textContent = `${wordCount} words`;
         }
       }
     } catch (err) {
@@ -202,7 +237,8 @@ export function initJournal() {
     if (now - lastEmitTime > 500) {
       const id = idInput.value;
       if (id) {
-        window.__TAURI__.event.emit('journal_analysis_queued', { id });
+        // D-106: Fires immediately
+        globalThis.__TAURI__.event.emit('journal_analysis_queued', { id });
         lastEmitTime = now;
       }
     }
@@ -210,6 +246,14 @@ export function initJournal() {
     clearTimeout(saveTimeout);
     saveTimeout = setTimeout(save, 1500);
   };
+
+  // ── SCROLL TO LOAD (VirtualList Lite) ────────────────
+  listEl.addEventListener("scroll", () => {
+    const { scrollTop, scrollHeight, clientHeight } = listEl;
+    if (scrollTop + clientHeight >= scrollHeight - 20) {
+      loadMore();
+    }
+  });
 
   // ── INIT ────────────────────────────────────────
   editor.addEventListener("input", triggerAutoSave);

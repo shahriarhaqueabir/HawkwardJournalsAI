@@ -1626,6 +1626,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "graphqlite"
+version = "0.4.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9d88630ba1b3ba5d6c1bd934f4b826a32b52362b719d7b402071512dbad5f4fc"
+dependencies = [
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "gtk"
 version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1742,6 +1754,7 @@ dependencies = [
  "chrono",
  "dirs 5.0.1",
  "fxhash",
+ "graphqlite",
  "regex",
  "reqwest 0.12.28",
  "rusqlite",

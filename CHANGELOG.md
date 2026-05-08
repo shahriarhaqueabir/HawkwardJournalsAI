@@ -1,7 +1,24 @@
 # Changelog
 
+## 2026-05-08
+
+### Phase 2: Task Management & Hierarchy
+
+- **Hierarchical Tasks**: Supported up to 2 levels of nesting with backend depth enforcement.
+- **Task Dependencies**: Relational blocking logic with UI indicators and search-and-select linker.
+- **Dynamic Views**: Integrated List and Kanban Board views with drag-and-drop persistence.
+- **Smart Scheduling**:
+  - Implemented Daily/Weekly/Monthly recurrence logic for automated task spawning.
+  - Integrated system notifications for task reminders via background polling worker.
+- **UI Refinements**:
+  - Enhanced Task Detail panel with dependency linker and recurrence settings.
+  - Added filter tabs (All/Pending/Completed) and view toggler (List/Board).
+  - Implemented 🔒 icons for blocked tasks.
+
 ## 2026-03-18
+
 ### AI Analysis Pipeline Hardening
+
 - **Event-Queue-Worker Architecture**: Implemented background analysis worker to decouple UI from AI latency (`src-tauri/src/lib.rs`).
 - **Memory Safety**:
   - Fixed "Double Move" AppHandle errors by using `handle.clone()` for separate async scopes.
@@ -16,12 +33,14 @@
 - **Frontend Sync**: Updated `ai-sidebar.js` and `journal.js` to handle standardized object-based payloads and show processing states.
 
 ### GitHub & Security Preparation
+
 - **Secure .gitignore**: Blocked all user data (`/data`, `/backups`, `/attachments`, `/exports`) and SQLite temporary files while allowing critical `Cargo.lock` files.
 - **Scaffolding**: Added `.gitkeep` to all local data directories to maintain structure in the repo.
 - **Documentation**: Overhauled `README.md` with professional project overviews, setup guides, and privacy highlights.
 - **Prompt Engineering**: Refined `src-tauri/src/ai/prompt.rs` to include the `mood` field and restrict output to JSON only.
 
 ## 2026-03-16
+
 - Initialized project scaffold per spec.
 - Added directories: src-tauri, src-tauri/src, src-tauri/src/db, src-tauri/src/ai, src-tauri/src/backup, src-tauri/src/scheduler, src-tauri/migrations, src, src/styles, src/styles/themes, src/js, src/js/tabs, src/views, src/assets, src/assets/libs, data, backups, attachments, exports.
 - Added files: AGENTS.md, README.md, src-tauri/Cargo.toml, src-tauri/tauri.conf.json, src-tauri/src/main.rs, src-tauri/src/lib.rs, src-tauri/src/error.rs, src-tauri/src/events.rs, src-tauri/src/logger.rs.

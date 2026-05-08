@@ -23,6 +23,7 @@ pub struct RawAnalysis {
     pub emotions: Option<Vec<String>>,
     pub tasks: Option<Vec<String>>,
     pub insights: Option<Vec<String>>,
+    pub triplets: Option<Vec<(String, String, String)>>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -33,6 +34,7 @@ pub struct AnalysisResult {
     pub emotions: Vec<String>,
     pub tasks: Vec<String>,
     pub insights: Vec<String>,
+    pub triplets: Vec<(String, String, String)>,
 }
 
 impl AnalysisResult {
@@ -44,6 +46,7 @@ impl AnalysisResult {
             emotions: raw.emotions.unwrap_or_default(),
             tasks: raw.tasks.unwrap_or_default(),
             insights: raw.insights.unwrap_or_default(),
+            triplets: raw.triplets.unwrap_or_default(),
         }
     }
 }

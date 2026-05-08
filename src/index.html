@@ -19,6 +19,7 @@
       <button class="nav-item active" data-tab="journal">📓 Journal</button>
       <button class="nav-item" data-tab="tasks">✅ Tasks</button>
       <button class="nav-item" data-tab="ai">🤖 AI</button>
+      <button class="nav-item" data-tab="memory">🧠 Memory</button>
       <button class="nav-item" data-tab="reports">📊 Reports</button>
       <button class="nav-item" data-tab="settings">⚙️ Settings</button>
     </nav>
@@ -71,18 +72,41 @@
       <div class="tasks-view-layout">
         <header class="tasks-header">
           <div class="header-main">
-            <h2>Active Tasks</h2>
-            <div class="task-search-box">
-              <input type="text" id="task-search" placeholder="Search tasks..." />
+            <h2>Task Management</h2>
+            <div class="task-tabs">
+              <button class="task-tab active" data-filter="all">All</button>
+              <button class="task-tab" data-filter="pending">Pending</button>
+              <button class="task-tab" data-filter="completed">Completed</button>
+            </div>
+            <div class="view-toggler">
+              <button class="view-tab active" data-view="list">☰ List</button>
+              <button class="view-tab" data-view="board">📋 Board</button>
             </div>
           </div>
           <div class="header-actions">
+            <div class="task-search-box">
+              <input type="text" id="task-search" placeholder="Search tasks..." />
+            </div>
             <button id="btn-new-task" class="btn-primary">+ Add Task</button>
           </div>
         </header>
         <div id="task-list-items" class="task-items-container">
           <!-- Tasks will be rendered here -->
           <div class="list-empty">Loading tasks...</div>
+        </div>
+        <div id="task-kanban-board" class="kanban-container hidden">
+          <div class="kanban-column" data-status="todo">
+            <div class="column-header">To Do</div>
+            <div class="column-items"></div>
+          </div>
+          <div class="kanban-column" data-status="in_progress">
+            <div class="column-header">In Progress</div>
+            <div class="column-items"></div>
+          </div>
+          <div class="kanban-column" data-status="done">
+            <div class="column-header">Done</div>
+            <div class="column-items"></div>
+          </div>
         </div>
       </div>
 
@@ -102,6 +126,13 @@
             <label for="detail-task-desc">Description</label>
             <textarea id="detail-task-desc" rows="4" placeholder="Add details..."></textarea>
           </div>
+          
+          <div id="subtasks-section" class="form-group hidden">
+            <label>Subtasks</label>
+            <div id="subtask-list" class="subtask-mini-list"></div>
+            <button id="btn-add-subtask" class="btn-ghost-sm">+ Add Subtask</button>
+          </div>
+
           <div class="form-row">
             <div class="form-group">
               <label for="detail-task-priority">Priority</label>
@@ -138,9 +169,29 @@
               </select>
             </div>
           </div>
-          <div class="form-group">
-            <label for="detail-task-project">Project</label>
-            <input type="text" id="detail-task-project" placeholder="Project name" />
+          <div id="dependencies-section" class="form-group">
+            <label>Dependencies (Blocks this task)</label>
+            <div id="dependency-list" class="dependency-mini-list"></div>
+            <div class="dependency-add-row">
+              <input type="text" id="dependency-search" placeholder="Search task to add..." />
+              <div id="dependency-search-results" class="mini-search-results hidden"></div>
+            </div>
+          </div>
+
+          <div class="form-row">
+            <div class="form-group">
+              <label for="detail-task-project">Project</label>
+              <input type="text" id="detail-task-project" placeholder="Project name" />
+            </div>
+            <div class="form-group">
+              <label for="detail-task-recurrence">Recurrence</label>
+              <select id="detail-task-recurrence">
+                <option value="">None</option>
+                <option value="daily">Daily</option>
+                <option value="weekly">Weekly</option>
+                <option value="monthly">Monthly</option>
+              </select>
+            </div>
           </div>
         </div>
         <footer class="panel-footer">
@@ -150,6 +201,9 @@
       </aside>
     </div>
     <div id="tab-ai" class="tab-view">AI Tab</div>
+    <div id="tab-memory" class="tab-view">
+        <!-- Memory view will be loaded here -->
+    </div>
     <div id="tab-reports" class="tab-view">Reports Tab</div>
     <div id="tab-settings" class="tab-view">Settings Tab</div>
   </main>
