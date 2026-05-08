@@ -1,6 +1,6 @@
 const { invoke } = window.__TAURI__.core;
 
-class MemoryMap {
+class MemoryManager {
     constructor() {
         this.canvas = document.getElementById('memory-canvas');
         this.ctx = this.canvas.getContext('2d');
@@ -13,7 +13,12 @@ class MemoryMap {
         this.dragNode = null;
         this.hoverNode = null;
         this.lastMouseX = 0;
+        this.lastMouseX = 0;
         this.lastMouseY = 0;
+        
+        this.currentView = 'map';
+        this.currentCategory = '';
+        this.facts = [];
         
         this.init();
     }
@@ -23,6 +28,7 @@ class MemoryMap {
         window.addEventListener('resize', () => this.resize());
         this.setupEvents();
         await this.loadData();
+        await this.loadFacts();
         this.animate();
     }
 
@@ -135,6 +141,91 @@ class MemoryMap {
             this.offsetX = this.canvas.width / 2;
             this.offsetY = this.canvas.height / 2;
         });
+
+        // View Switcher
+        document.querySelectorAll('.switcher-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const view = btn.dataset.view;
+                this.switchView(view);
+            });
+        });
+
+        // Category Filters
+        document.querySelectorAll('.cat-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                this.currentCategory = btn.dataset.cat;
+                document.querySelectorAll('.cat-btn').forEach(b => b.classList.remove('active'));
+                btn.classList.add('active');
+                this.renderFacts();
+            });
+        });
+    }
+
+    switchView(view) {
+        this.currentView = view;
+        document.querySelectorAll('.switcher-btn').forEach(b => {
+            b.classList.toggle('active', b.dataset.view === view);
+        });
+
+        const mapView = document.getElementById('map-view');
+        const bankView = document.getElementById('bank-view');
+        const stats = document.querySelector('.memory-stats');
+
+        if (view === 'map') {
+            mapView.classList.remove('hidden');
+            bankView.classList.add('hidden');
+            stats.classList.remove('hidden');
+        } else {
+            mapView.classList.add('hidden');
+            bankView.classList.remove('hidden');
+            stats.classList.add('hidden');
+            this.loadFacts();
+        }
+    }
+
+    async loadFacts() {
+        try {
+            this.facts = await invoke('profile_get_facts', { category: null });
+            this.renderFacts();
+        } catch (e) {
+            console.error('Failed to load facts:', e);
+        }
+    }
+
+    renderFacts() {
+        const container = document.getElementById('fact-list');
+        const filtered = this.currentCategory 
+            ? this.facts.filter(f => f.category === this.currentCategory)
+            : this.facts;
+
+        if (filtered.length === 0) {
+            container.innerHTML = `<div class="empty-state">No facts found in this category.</div>`;
+            return;
+        }
+
+        container.innerHTML = filtered.map(f => `
+            <div class="fact-card" data-id="${f.id}">
+                <div class="fact-header">
+                    <span class="fact-category">${f.category}</span>
+                    <span class="fact-confidence">${(f.confidence * 100).toFixed(0)}% confidence</span>
+                </div>
+                <div class="fact-content">${f.content}</div>
+                <div class="fact-footer">
+                    <span class="fact-key">${f.fact_key}</span>
+                    <button class="btn-delete-fact" onclick="window.memoryManager.deleteFact('${f.id}')" title="Delete Fact">🗑️</button>
+                </div>
+            </div>
+        `).join('');
+    }
+
+    async deleteFact(id) {
+        if (!confirm('Are you sure you want to delete this fact?')) return;
+        try {
+            await invoke('profile_delete_fact', { id });
+            await this.loadFacts();
+        } catch (e) {
+            console.error('Failed to delete fact:', e);
+        }
     }
 
     getMousePos(e) {
@@ -261,4 +352,6 @@ class MemoryMap {
 }
 
 // Global instance
-window.MemoryMap = MemoryMap;
+window.memoryManager = new MemoryManager();
+// Global instance
+window.MemoryManager = MemoryManager;

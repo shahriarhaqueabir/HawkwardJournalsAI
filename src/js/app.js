@@ -1,5 +1,6 @@
 import { initJournal } from "./tabs/journal.js";
 import { initTasks } from "./tabs/tasks.js";
+import { initSettings } from "./tabs/settings.js";
 import { initAiSidebar, handleAppEvent } from "./ai-sidebar.js";
 import { invoke } from "./ipc.js";
 
@@ -68,18 +69,20 @@ async function loadView(tabId, filePath) {
 initJournal();
 initTasks();
 initAiSidebar();
+initSettings();
 checkOllama();
 setInterval(checkOllama, 30000);
 
 // Load and Init Memory Map when tab is clicked
 document.querySelector('[data-tab="memory"]').addEventListener('click', async () => {
   const loaded = await loadView('memory', 'views/memory.html');
-  if (loaded || !window.memoryMapInstance) {
+  if (loaded || !window.memoryManager) {
     // Import script dynamically
     const script = document.createElement('script');
     script.src = 'js/tabs/memory.js';
     script.onload = () => {
-      window.memoryMapInstance = new window.MemoryMap();
+      // MemoryManager initializes itself in the script
+      console.log("Memory Manager loaded");
     };
     document.head.appendChild(script);
   }

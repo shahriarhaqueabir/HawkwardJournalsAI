@@ -24,6 +24,21 @@ pub struct RawAnalysis {
     pub tasks: Option<Vec<String>>,
     pub insights: Option<Vec<String>>,
     pub triplets: Option<Vec<(String, String, String)>>,
+    pub facts: Option<Vec<RawProposedFact>>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct RawProposedFact {
+    pub key: String,
+    pub content: String,
+    pub category: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct ProposedFact {
+    pub key: String,
+    pub content: String,
+    pub category: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -35,6 +50,7 @@ pub struct AnalysisResult {
     pub tasks: Vec<String>,
     pub insights: Vec<String>,
     pub triplets: Vec<(String, String, String)>,
+    pub facts: Vec<ProposedFact>,
 }
 
 impl AnalysisResult {
@@ -47,6 +63,11 @@ impl AnalysisResult {
             tasks: raw.tasks.unwrap_or_default(),
             insights: raw.insights.unwrap_or_default(),
             triplets: raw.triplets.unwrap_or_default(),
+            facts: raw.facts.unwrap_or_default().into_iter().map(|f| ProposedFact {
+                key: f.key,
+                content: f.content,
+                category: f.category,
+            }).collect(),
         }
     }
 }

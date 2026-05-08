@@ -205,7 +205,24 @@
         <!-- Memory view will be loaded here -->
     </div>
     <div id="tab-reports" class="tab-view">Reports Tab</div>
-    <div id="tab-settings" class="tab-view">Settings Tab</div>
+    <div id="tab-settings" class="tab-view">
+      <div class="settings-view-layout" style="padding: 20px; max-width: 800px; margin: 0 auto; color: var(--color-text);">
+        <h2>Settings</h2>
+        
+        <div class="settings-section" style="margin-top: 30px; background: var(--color-surface); padding: 20px; border-radius: var(--radius); border: 1px solid var(--color-border);">
+          <h3>Development & Debugging</h3>
+          <p style="color: var(--color-muted); font-size: 14px; margin-bottom: 16px;">
+            Encountered an issue? Submit a bug report. This will capture your recent actions and error logs into a detailed markdown file.
+          </p>
+          <div class="form-group">
+            <label for="bug-report-feedback">What went wrong?</label>
+            <textarea id="bug-report-feedback" rows="4" placeholder="Describe what you were doing and what happened..." style="width: 100%; margin-bottom: 12px;"></textarea>
+          </div>
+          <button id="btn-submit-bug" class="btn-primary">Generate Bug Report</button>
+          <div id="bug-report-status" style="margin-top: 12px; font-size: 13px; color: var(--color-accent);"></div>
+        </div>
+      </div>
+    </div>
   </main>
 
   <aside id="right-sidebar">

@@ -27,10 +27,36 @@ pub struct Task {
     pub context_tag: Option<String>,
     pub linked_url: Option<String>,
     pub ai_created: bool,
+    pub recurrence_rule: Option<String>,
     pub is_blocked: bool,
     pub created_at: String,
     pub updated_at: String,
     pub completed_at: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub struct TimeLog {
+    pub id: String,
+    pub task_id: String,
+    pub started_at: String,
+    pub ended_at: Option<String>,
+    pub duration: Option<i32>,
+    pub note: Option<String>,
+    pub created_at: String,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+#[serde(rename_all = "snake_case")]
+pub struct TaskAttachment {
+    pub id: String,
+    pub task_id: String,
+    pub file_name: String,
+    pub file_path: String,
+    pub mime_type: Option<String>,
+    pub size_bytes: Option<i32>,
+    pub file_missing: bool,
+    pub created_at: String,
 }
 
 pub fn create_task(conn: &Connection, task: &Task) -> Result<String, AppError> {
@@ -98,6 +124,7 @@ pub fn list_tasks(conn: &Connection, include_completed: bool) -> Result<Vec<Task
             labels: row.get(14)?,
             category: row.get(15)?,
             project: row.get(16)?,
+            recurrence_rule: row.get(18)?,
             energy_level: row.get(20)?,
             context_tag: row.get(21)?,
             linked_url: row.get(22)?,
@@ -207,6 +234,7 @@ pub fn get_task(conn: &Connection, id: &str) -> Result<Option<Task>, AppError> {
             labels: row.get(14)?,
             category: row.get(15)?,
             project: row.get(16)?,
+            recurrence_rule: row.get(18)?,
             energy_level: row.get(20)?,
             context_tag: row.get(21)?,
             linked_url: row.get(22)?,
@@ -283,6 +311,7 @@ pub fn search_tasks(conn: &Connection, query: &str) -> Result<Vec<Task>, AppErro
             labels: row.get(14)?,
             category: row.get(15)?,
             project: row.get(16)?,
+            recurrence_rule: row.get(18)?,
             energy_level: row.get(20)?,
             context_tag: row.get(21)?,
             linked_url: row.get(22)?,
@@ -345,6 +374,7 @@ pub fn get_dependencies(conn: &Connection, task_id: &str) -> Result<Vec<Task>, A
             labels: row.get(14)?,
             category: row.get(15)?,
             project: row.get(16)?,
+            recurrence_rule: row.get(18)?,
             energy_level: row.get(20)?,
             context_tag: row.get(21)?,
             linked_url: row.get(22)?,
@@ -361,4 +391,109 @@ pub fn get_dependencies(conn: &Connection, task_id: &str) -> Result<Vec<Task>, A
         tasks.push(task?);
     }
     Ok(tasks)
+}
+
+// ==========================================
+// Phase 2 Placeholders: Timers
+// ==========================================
+
+pub fn timer_start(conn: &Connection, task_id: &str) -> Result<String, AppError> {
+    let now = Utc::now().to_rfc3339();
+    let id = Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO time_logs (id, task_id, started_at, created_at) VALUES (?1, ?2, ?3, ?4)",
+        params![id, task_id, now, now],
+    )?;
+    Ok(id)
+}
+
+pub fn timer_stop(conn: &Connection, log_id: &str, duration: i32, note: Option<&str>) -> Result<(), AppError> {
+    let now = Utc::now().to_rfc3339();
+    
+    // Update the time_log
+    conn.execute(
+        "UPDATE time_logs SET ended_at = ?1, duration = ?2, note = ?3 WHERE id = ?4",
+        params![now, duration, note, log_id],
+    )?;
+    
+    // Also update the task time_logged
+    conn.execute(
+        "UPDATE tasks SET time_logged = time_logged + ?1 WHERE id = (SELECT task_id FROM time_logs WHERE id = ?2)",
+        params![duration, log_id],
+    )?;
+
+    Ok(())
+}
+
+pub fn timer_get_logs(conn: &Connection, task_id: &str) -> Result<Vec<TimeLog>, AppError> {
+    let mut stmt = conn.prepare("SELECT * FROM time_logs WHERE task_id = ?1 ORDER BY started_at DESC")?;
+    let rows = stmt.query_map(params![task_id], |row| {
+        Ok(TimeLog {
+            id: row.get(0)?,
+            task_id: row.get(1)?,
+            started_at: row.get(2)?,
+            ended_at: row.get(3)?,
+            duration: row.get(4)?,
+            note: row.get(5)?,
+            created_at: row.get(6)?,
+        })
+    })?;
+
+    let mut logs = Vec::new();
+    for row in rows {
+        logs.push(row?);
+    }
+    Ok(logs)
+}
+
+// ==========================================
+// Phase 2 Placeholders: Attachments
+// ==========================================
+
+pub fn attachment_add(
+    conn: &Connection,
+    task_id: &str,
+    file_name: &str,
+    file_path: &str,
+    mime_type: Option<&str>,
+    size_bytes: Option<i32>,
+) -> Result<String, AppError> {
+    let now = Utc::now().to_rfc3339();
+    let id = Uuid::new_v4().to_string();
+    conn.execute(
+        "INSERT INTO task_attachments (id, task_id, file_name, file_path, mime_type, size_bytes, file_missing, created_at)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, 0, ?7)",
+        params![id, task_id, file_name, file_path, mime_type, size_bytes, now],
+    )?;
+    Ok(id)
+}
+
+pub fn attachment_remove(conn: &Connection, attachment_id: &str) -> Result<(), AppError> {
+    conn.execute(
+        "DELETE FROM task_attachments WHERE id = ?1",
+        params![attachment_id],
+    )?;
+    Ok(())
+}
+
+pub fn attachment_list(conn: &Connection, task_id: &str) -> Result<Vec<TaskAttachment>, AppError> {
+    let mut stmt = conn.prepare("SELECT * FROM task_attachments WHERE task_id = ?1 ORDER BY created_at DESC")?;
+    let rows = stmt.query_map(params![task_id], |row| {
+        Ok(TaskAttachment {
+            id: row.get(0)?,
+            task_id: row.get(1)?,
+            file_name: row.get(2)?,
+            file_path: row.get(3)?,
+            mime_type: row.get(4)?,
+            size_bytes: row.get(5)?,
+            file_missing: row.get::<_, i32>(6)? != 0,
+            created_at: row.get(7)?,
+        })
+    })?;
+
+    let mut attachments = Vec::new();
+    for row in rows {
+        attachments.push(row?);
+    }
+    Ok(attachments)
 }

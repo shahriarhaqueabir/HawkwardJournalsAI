@@ -3,6 +3,7 @@ use serde_json::json;
 use std::time::Duration;
 use crate::ai::{RawAnalysis, AnalysisResult};
 use crate::error::AppError;
+use futures_util::StreamExt;
 
 pub struct OllamaClient {
     http: Client,
@@ -62,12 +63,6 @@ impl OllamaClient {
         let status = response.status();
         if !status.is_success() {
             let error_text = response.text().await.unwrap_or_default();
-            if error_text.contains("not found") {
-                return Err(AppError::AiError(format!(
-                    "Model '{}' not found. Please run 'ollama pull {}'",
-                    self.model, self.model
-                )));
-            }
             return Err(AppError::AiError(format!(
                 "HTTP error {}: {}",
                 status, error_text
@@ -82,7 +77,6 @@ impl OllamaClient {
             .filter(|s| !s.trim().is_empty())
             .ok_or_else(|| AppError::AiError(format!("Empty or missing response field: {}", body)))?;
 
-        // JSON safety fallback: if AI returns invalid schema, use a basic fallback
         let raw: RawAnalysis = serde_json::from_str(response_text)
             .unwrap_or(RawAnalysis {
                 summary: "Analysis failed to parse properly.".into(),
@@ -90,13 +84,67 @@ impl OllamaClient {
                 emotions: None,
                 tasks: None,
                 insights: None,
+                triplets: None,
+                facts: None,
             });
 
         Ok(AnalysisResult::from_raw(raw, id))
     }
+
+    pub async fn chat_stream(
+        &self,
+        app: tauri::AppHandle,
+        conversation_id: String,
+        system_prompt: String,
+        messages: Vec<serde_json::Value>,
+    ) -> Result<(), AppError> {
+        let response = self.http
+            .post("http://127.0.0.1:11434/api/chat")
+            .json(&json!({
+                "model": self.model,
+                "messages": messages,
+                "system": system_prompt,
+                "stream": true,
+                "options": {
+                    "temperature": 0.7,
+                    "num_ctx": 16384
+                }
+            }))
+            .send()
+            .await
+            .map_err(|e| AppError::AiError(format!("Connection failed: {}", e)))?;
+
+        if !response.status().is_success() {
+            return Err(AppError::AiError(format!("Ollama error: {}", response.status())));
+        }
+
+        let mut stream = response.bytes_stream();
+
+        while let Some(chunk_result) = stream.next().await {
+            let chunk = chunk_result.map_err(|e| AppError::AiError(e.to_string()))?;
+            let line = String::from_utf8_lossy(&chunk);
+            
+            for json_str in line.split('\n').filter(|s| !s.trim().is_empty()) {
+                if let Ok(val) = serde_json::from_str::<serde_json::Value>(json_str) {
+                    if let Some(token) = val["message"]["content"].as_str() {
+                        crate::events::emit(&app, crate::events::AppEvent::AiToken {
+                            conversation_id: conversation_id.clone(),
+                            token: token.to_string(),
+                        });
+                    }
+                    if val["done"].as_bool().unwrap_or(false) {
+                        crate::events::emit(&app, crate::events::AppEvent::AiResponseComplete {
+                            conversation_id: conversation_id.clone(),
+                        });
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
-// Smart truncation (Head 2k + Tail 2k)
 fn truncate_content(content: &str) -> String {
     if content.len() <= 4000 {
         return content.to_string();

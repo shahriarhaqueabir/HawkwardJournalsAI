@@ -1,5 +1,26 @@
 # Changelog
 
+## [0.6.0] - 2026-05-08
+
+### Added
+
+- **Hawkward Memory Bank**: Implemented dual-view UI (Neural Map & Knowledge Bank) for long-term user knowledge storage and visualization.
+- **Human-in-the-Loop Fact Refinement**: Integrated "Proposed Facts" UI into the AI Sidebar with "Accept" and "Reject" functionality to safely populate the Memory Bank.
+- **Contextual AI Injection**: The AI Assistant now automatically recalls stored user facts in conversational sessions via dynamic system prompt injection.
+- **Streaming AI Chat**: Implemented background streaming chat in the Sidebar with real-time token delivery using the `api/chat` endpoint.
+- **Comprehensive Debugging System**: Added persistent `hawkward-debug.log` tracing and a built-in Bug Report generator in the Settings UI that packages OS context and logs into `.md` exports.
+- **Phase 2 Task Management Completion**: Fully implemented backend logic for Time Tracking (`time_logs`) and File Attachments (`task_attachments`) including `timer_start`, `timer_stop`, `attachment_add`, and `attachment_list`.
+- **Database Schema Sync**: Restored `recurrence_rule` and `is_blocked` fields to the Rust `Task` structs to align with the core schema.
+- **New Rust Commands**: Added `ai_chat`, `profile_upsert_fact`, `profile_get_facts`, `profile_delete_fact`, `timer_start`, `timer_stop`, `timer_get_logs`, `attachment_add`, `attachment_remove`, `attachment_list`, `report_bug`.
+- **New Events**: Added `AiToken` and `AiResponseComplete` for frontend UI synchronization.
+- **Dependencies**: Integrated `futures-util` for asynchronous stream processing in the backend and `tracing-subscriber` for persistent file logging.
+
+### Changed
+
+- Refactored `src-tauri/src/lib.rs` to consolidate all command handlers and improve the background analysis worker loop stability.
+- Upgraded `OllamaClient` to support both JSON analysis generation and NDJSON streaming chat.
+- Updated `ai-sidebar.js` to function as a hybrid interface for both automated journal insights and interactive user chat.
+
 ## 2026-05-08
 
 ### Phase 2: Task Management & Hierarchy

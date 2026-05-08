@@ -28,6 +28,13 @@ pub enum AppEvent {
     AiModelMissing {
         model: String,
     },
+    AiToken {
+        conversation_id: String,
+        token: String,
+    },
+    AiResponseComplete {
+        conversation_id: String,
+    },
 }
 
 pub fn emit(app: &AppHandle, event: AppEvent) {

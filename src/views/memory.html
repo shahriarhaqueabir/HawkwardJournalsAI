@@ -1,9 +1,13 @@
 <div id="memory-view" class="tab-content" style="display: none;">
     <div class="memory-header">
-        <h1>Memory Map</h1>
+        <h1>Memory</h1>
+        <div class="view-switcher">
+            <button class="switcher-btn active" data-view="map">Neural Map</button>
+            <button class="switcher-btn" data-view="bank">Knowledge Bank</button>
+        </div>
         <div class="memory-actions">
             <button id="refresh-memory" class="btn btn-secondary">
-                <span class="icon">🔄</span> Refresh Map
+                <span class="icon">🔄</span> Refresh
             </button>
             <div class="memory-stats">
                 <span id="node-count">0 nodes</span>
@@ -13,7 +17,7 @@
         </div>
     </div>
     
-    <div class="memory-container">
+    <div id="map-view" class="memory-container">
         <canvas id="memory-canvas"></canvas>
         <div id="memory-tooltip" class="tooltip" style="display: none;"></div>
         
@@ -26,6 +30,25 @@
             <button id="zoom-in" title="Zoom In">+</button>
             <button id="zoom-out" title="Zoom Out">−</button>
             <button id="reset-view" title="Reset View">⌂</button>
+        </div>
+    </div>
+
+    <div id="bank-view" class="memory-container hidden">
+        <div class="bank-sidebar">
+            <h3>Categories</h3>
+            <div class="category-list">
+                <button class="cat-btn active" data-cat="">All Facts</button>
+                <button class="cat-btn" data-cat="preference">Preferences</button>
+                <button class="cat-btn" data-cat="habit">Habits</button>
+                <button class="cat-btn" data-cat="constraint">Constraints</button>
+                <button class="cat-btn" data-cat="person">People</button>
+                <button class="cat-btn" data-cat="goal">Goals</button>
+            </div>
+        </div>
+        <div class="bank-content">
+            <div id="fact-list" class="fact-grid">
+                <!-- Facts will be rendered here -->
+            </div>
         </div>
     </div>
 </div>
@@ -139,4 +162,160 @@
     z-index: 100;
     box-shadow: 0 4px 12px rgba(0,0,0,0.3);
 }
+
+.view-switcher {
+    display: flex;
+    background: var(--bg-primary);
+    padding: 4px;
+    border-radius: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.switcher-btn {
+    padding: 6px 16px;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    transition: all 0.2s;
+}
+
+.switcher-btn.active {
+    background: var(--accent-primary);
+    color: white;
+}
+
+#bank-view {
+    display: flex;
+    background: var(--bg-primary);
+}
+
+.bank-sidebar {
+    width: 220px;
+    border-right: 1px solid var(--border-color);
+    padding: 20px;
+    background: var(--bg-secondary);
+}
+
+.bank-sidebar h3 {
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    margin-bottom: 15px;
+    letter-spacing: 0.05rem;
+}
+
+.category-list {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+}
+
+.cat-btn {
+    text-align: left;
+    padding: 8px 12px;
+    border: none;
+    background: transparent;
+    color: var(--text-primary);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.2s;
+}
+
+.cat-btn:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.cat-btn.active {
+    background: rgba(var(--accent-primary-rgb), 0.1);
+    color: var(--accent-primary);
+    font-weight: 600;
+}
+
+.bank-content {
+    flex: 1;
+    padding: 25px;
+    overflow-y: auto;
+}
+
+.fact-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+    gap: 20px;
+}
+
+.fact-card {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 20px;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.fact-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 8px 24px rgba(0,0,0,0.2);
+    border-color: var(--accent-primary);
+}
+
+.fact-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 12px;
+}
+
+.fact-category {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    padding: 2px 8px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-muted);
+}
+
+.fact-confidence {
+    font-size: 0.75rem;
+    color: var(--accent-primary);
+}
+
+.fact-content {
+    font-size: 1rem;
+    line-height: 1.5;
+    color: var(--text-primary);
+    margin-bottom: 15px;
+}
+
+.fact-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.fact-key {
+    font-family: monospace;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+}
+
+.btn-delete-fact {
+    background: transparent;
+    border: none;
+    color: #e74c3c;
+    cursor: pointer;
+    font-size: 0.9rem;
+    opacity: 0.6;
+    transition: opacity 0.2s;
+}
+
+.btn-delete-fact:hover {
+    opacity: 1;
+}
+
+.hidden { display: none !important; }
 </style>

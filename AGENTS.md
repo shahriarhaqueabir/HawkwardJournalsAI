@@ -17,7 +17,6 @@ HawkwardJournalAI is a private, offline-first Windows desktop productivity app b
 **Open issues:**
 - Refactor raw string events to Typed `AppEvent` enum (D-96 compliance).
 - Implement VirtualList + Keyset Cursor for Journal (D-45, D-104).
-- Phase 2 (Task Management) handlers still placeholders.
 **Spec files:** `AgentDocs/PersonalLifeOS_MASTER_SPEC_v1.6.md` + `AgentDocs/PersonalLifeOS_SPEC_ADDENDUM_v1.7.md`
 **Locked decisions:** D-01 through D-111 (111 total)
 

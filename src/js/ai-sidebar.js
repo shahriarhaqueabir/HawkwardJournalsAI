@@ -1,11 +1,24 @@
 import { invoke } from "./ipc.js";
 
 let messagesEl = null;
+let inputEl = null;
 let currentEntryId = null;
+let currentConversationId = null;
+let currentAiBubble = null;
 
 export function initAiSidebar() {
   messagesEl = document.getElementById("ai-chat-messages");
+  inputEl = document.getElementById("ai-chat-input");
   currentEntryId = document.getElementById("current-entry-id");
+
+  if (inputEl) {
+    inputEl.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        sendChatMessage();
+      }
+    });
+  }
 }
 
 // ── PUBLIC EVENT HANDLER (D-96) ────────────────────────
@@ -36,6 +49,18 @@ export function handleAppEvent(payload) {
     case "journal_analysis_error":
       if (currentEntryId.value === payload.entry_id) {
         showErrorStatus(payload.error);
+      }
+      break;
+
+    case "ai_token":
+      if (payload.conversation_id === currentConversationId) {
+        appendToken(payload.token);
+      }
+      break;
+
+    case "ai_response_complete":
+      if (payload.conversation_id === currentConversationId) {
+        currentAiBubble = null;
       }
       break;
 
@@ -81,7 +106,7 @@ function showErrorStatus(error) {
 
 function renderAnalysisResult(result) {
   if (!messagesEl) return;
-  const { summary, emotions, tasks, insights, mood } = result;
+  const { summary, emotions, tasks, insights, facts, mood } = result;
 
   let html = `
     <div class="analysis-card">
@@ -130,6 +155,28 @@ function renderAnalysisResult(result) {
     `;
   }
 
+  if (facts && facts.length > 0) {
+    html += `
+      <div class="analysis-section facts">
+        <h3>Proposed Facts</h3>
+        <ul class="fact-suggestions">
+          ${facts.map(f => `
+            <li>
+              <div class="fact-content">
+                <span class="fact-category badge">${f.category}</span>
+                <span class="fact-text">${f.content}</span>
+              </div>
+              <div class="fact-actions">
+                <button class="btn-fact-add btn-ghost-sm" data-key="${f.key}" data-content="${f.content}" data-category="${f.category}">Accept</button>
+                <button class="btn-fact-reject btn-ghost-sm">Reject</button>
+              </div>
+            </li>
+          `).join("")}
+        </ul>
+      </div>
+    `;
+  }
+
   html += `</div>`;
   messagesEl.innerHTML = html;
 
@@ -149,4 +196,92 @@ function renderAnalysisResult(result) {
       }
     });
   });
+
+  // Fact listeners (Phase 3 wiring)
+  messagesEl.querySelectorAll(".btn-fact-add").forEach(btn => {
+    btn.addEventListener("click", async () => {
+      const now = new Date().toISOString();
+      const fact = {
+        id: crypto.randomUUID(),
+        fact_key: btn.dataset.key,
+        content: btn.dataset.content,
+        category: btn.dataset.category,
+        confidence: 0.8, // Default confidence for user-accepted facts
+        source_entry_id: currentEntryId.value || null,
+        created_at: now,
+        updated_at: now
+      };
+
+      try {
+        btn.disabled = true;
+        btn.textContent = "...";
+        await invoke("profile_upsert_fact", { fact });
+        btn.textContent = "✓ Accepted";
+        btn.classList.add("added");
+        const rejectBtn = btn.parentElement.querySelector(".btn-fact-reject");
+        if (rejectBtn) rejectBtn.remove();
+      } catch (err) {
+        btn.textContent = "Error";
+        btn.disabled = false;
+        console.error("Failed to add fact:", err);
+      }
+    });
+  });
+
+  messagesEl.querySelectorAll(".btn-fact-reject").forEach(btn => {
+    btn.addEventListener("click", () => {
+      const li = btn.closest("li");
+      const acceptBtn = li.querySelector(".btn-fact-add");
+      if (acceptBtn) acceptBtn.remove();
+      btn.textContent = "✗ Rejected";
+      btn.disabled = true;
+      li.style.opacity = "0.5";
+    });
+  });
+}
+
+async function sendChatMessage() {
+  const text = inputEl.value.trim();
+  if (!text) return;
+
+  inputEl.value = "";
+  appendUserMessage(text);
+
+  try {
+    currentConversationId = await invoke("ai_chat", {
+      conversationId: currentConversationId,
+      message: text
+    });
+    
+    currentAiBubble = createAiBubble();
+  } catch (err) {
+    console.error("AI Chat Error:", err);
+    const bubble = createAiBubble();
+    bubble.classList.add("error");
+    bubble.textContent = "I'm having trouble thinking right now. Is Ollama running?";
+  }
+}
+
+function appendUserMessage(text) {
+  const div = document.createElement("div");
+  div.className = "chat-bubble user";
+  div.textContent = text;
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+}
+
+function createAiBubble() {
+  const div = document.createElement("div");
+  div.className = "chat-bubble ai";
+  messagesEl.appendChild(div);
+  messagesEl.scrollTop = messagesEl.scrollHeight;
+  return div;
+}
+
+function appendToken(token) {
+  if (!currentAiBubble) {
+    currentAiBubble = createAiBubble();
+  }
+  currentAiBubble.textContent += token;
+  messagesEl.scrollTop = messagesEl.scrollHeight;
 }
