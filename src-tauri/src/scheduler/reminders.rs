@@ -2,7 +2,7 @@ use tauri::AppHandle;
 use tauri::Manager;
 use chrono::Utc;
 use crate::AppState;
-use crate::db::tasks::{Task, get_task};
+use crate::db::tasks::get_task;
 use tauri_plugin_notification::NotificationExt;
 
 pub fn spawn_reminder_worker(handle: AppHandle) {

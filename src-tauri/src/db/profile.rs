@@ -2,7 +2,6 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use crate::error::AppError;
 use chrono::Utc;
-use uuid::Uuid;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ProfileFact {
@@ -43,7 +42,7 @@ pub fn upsert_fact(conn: &Connection, fact: &ProfileFact) -> Result<(), AppError
 }
 
 pub fn get_facts(conn: &Connection, category: Option<&str>) -> Result<Vec<ProfileFact>, AppError> {
-    let mut stmt = if let Some(cat) = category {
+    let mut stmt = if category.is_some() {
         conn.prepare("SELECT * FROM user_profile WHERE category = ?1 ORDER BY confidence DESC")?
     } else {
         conn.prepare("SELECT * FROM user_profile ORDER BY category, confidence DESC")?

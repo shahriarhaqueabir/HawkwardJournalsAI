@@ -4,6 +4,8 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+const IS_BLOCKED_COLUMN_INDEX: usize = 29;
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "snake_case")]
 pub struct Task {
@@ -129,7 +131,7 @@ pub fn list_tasks(conn: &Connection, include_completed: bool) -> Result<Vec<Task
             context_tag: row.get(21)?,
             linked_url: row.get(22)?,
             ai_created: row.get::<_, i32>(24)? != 0,
-            is_blocked: row.get::<_, i32>(row.column_count() - 1)? != 0,
+            is_blocked: row.get::<_, i32>(IS_BLOCKED_COLUMN_INDEX)? != 0,
             created_at: row.get(26)?,
             updated_at: row.get(27)?,
             completed_at: row.get(28)?,
@@ -239,7 +241,7 @@ pub fn get_task(conn: &Connection, id: &str) -> Result<Option<Task>, AppError> {
             context_tag: row.get(21)?,
             linked_url: row.get(22)?,
             ai_created: row.get::<_, i32>(24)? != 0,
-            is_blocked: row.get::<_, i32>(row.column_count() - 1)? != 0,
+            is_blocked: row.get::<_, i32>(IS_BLOCKED_COLUMN_INDEX)? != 0,
             created_at: row.get(26)?,
             updated_at: row.get(27)?,
             completed_at: row.get(28)?,
@@ -316,7 +318,7 @@ pub fn search_tasks(conn: &Connection, query: &str) -> Result<Vec<Task>, AppErro
             context_tag: row.get(21)?,
             linked_url: row.get(22)?,
             ai_created: row.get::<_, i32>(24)? != 0,
-            is_blocked: row.get::<_, i32>(row.column_count() - 1)? != 0,
+            is_blocked: row.get::<_, i32>(IS_BLOCKED_COLUMN_INDEX)? != 0,
             created_at: row.get(26)?,
             updated_at: row.get(27)?,
             completed_at: row.get(28)?,
@@ -379,7 +381,7 @@ pub fn get_dependencies(conn: &Connection, task_id: &str) -> Result<Vec<Task>, A
             context_tag: row.get(21)?,
             linked_url: row.get(22)?,
             ai_created: row.get::<_, i32>(24)? != 0,
-            is_blocked: row.get::<_, i32>(row.column_count() - 1)? != 0,
+            is_blocked: row.get::<_, i32>(IS_BLOCKED_COLUMN_INDEX)? != 0,
             created_at: row.get(26)?,
             updated_at: row.get(27)?,
             completed_at: row.get(28)?,

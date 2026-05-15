@@ -1,7 +1,6 @@
 use crate::db::{migrations, paths, settings};
 use crate::error::AppError;
 use rusqlite::Connection;
-use graphqlite::Graph;
 use std::time::Duration;
 
 pub fn initialise() -> Result<Connection, AppError> {

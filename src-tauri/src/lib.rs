@@ -6,7 +6,7 @@ mod events;
 mod logger;
 mod scheduler;
 
-use tauri::{Manager, Emitter, Listener};
+use tauri::{Manager, Listener};
 use chrono::Utc;
 use db::paths::resolve_data_dir;
 use error::AppError;
@@ -98,7 +98,7 @@ async fn task_create(
     let now = Utc::now().to_rfc3339();
     let task = db::tasks::Task {
         id: Uuid::new_v4().to_string(),
-        parent_task_id,
+        parent_task_id: parent_task_id.clone(),
         title,
         description: None,
         status: "todo".into(),
@@ -289,8 +289,24 @@ async fn graph_query(
     let graph = state.graph.lock().await;
     let results = graph.query(&cypher)
         .map_err(|e| AppError::AiError(format!("Graph Query Error: {}", e)))?;
-    
-    Ok(serde_json::to_value(results).unwrap_or(serde_json::Value::Null))
+
+    let mut rows_json = Vec::new();
+    for row in &results {
+        let mut obj = serde_json::Map::new();
+        for col in row.columns() {
+            let value = row
+                .get_value(col)
+                .cloned()
+                .map(serde_json::to_value)
+                .transpose()
+                .map_err(|e| AppError::AiError(format!("Graph serialization error: {}", e)))?
+                .unwrap_or(serde_json::Value::Null);
+            obj.insert(col.clone(), value);
+        }
+        rows_json.push(serde_json::Value::Object(obj));
+    }
+
+    Ok(serde_json::Value::Array(rows_json))
 }
 
 #[tauri::command]

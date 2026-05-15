@@ -6,13 +6,16 @@ class MemoryManager {
         this.ctx = this.canvas.getContext('2d');
         this.nodes = [];
         this.edges = [];
+        this.selectedNode = null;
+        this.expandedNodes = new Set();
+        this.visibleNodes = null;
         this.zoom = 1;
         this.offsetX = 0;
         this.offsetY = 0;
         this.isDragging = false;
+        this.didPan = false;
         this.dragNode = null;
         this.hoverNode = null;
-        this.lastMouseX = 0;
         this.lastMouseX = 0;
         this.lastMouseY = 0;
         
@@ -92,6 +95,25 @@ class MemoryManager {
 
         this.nodes = Array.from(nodeMap.values());
         this.edges = newEdges;
+        this.selectedNode = null;
+        this.expandedNodes.clear();
+        this.visibleNodes = null;
+        this.buildNodeAdjacency();
+        this.renderNodeDetails();
+    }
+
+    buildNodeAdjacency() {
+        this.nodes.forEach(node => {
+            node.neighbors = new Set();
+            node.relations = [];
+        });
+
+        this.edges.forEach(edge => {
+            edge.source.neighbors.add(edge.target.id);
+            edge.target.neighbors.add(edge.source.id);
+            edge.source.relations.push(`→ ${edge.label} → ${edge.target.id}`);
+            edge.target.relations.push(`← ${edge.label} ← ${edge.source.id}`);
+        });
     }
 
     setupEvents() {
@@ -100,6 +122,7 @@ class MemoryManager {
             this.dragNode = this.findNodeAt(x, y);
             if (!this.dragNode) {
                 this.isDragging = true;
+                this.didPan = false;
                 this.lastMouseX = e.clientX;
                 this.lastMouseY = e.clientY;
             }
@@ -115,6 +138,7 @@ class MemoryManager {
             } else if (this.isDragging) {
                 this.offsetX += (e.clientX - this.lastMouseX);
                 this.offsetY += (e.clientY - this.lastMouseY);
+                this.didPan = true;
                 this.lastMouseX = e.clientX;
                 this.lastMouseY = e.clientY;
             }
@@ -125,6 +149,15 @@ class MemoryManager {
         window.addEventListener('mouseup', () => {
             this.dragNode = null;
             this.isDragging = false;
+        });
+
+        this.canvas.addEventListener('click', (e) => {
+            if (this.didPan) return;
+            const { x, y } = this.getMousePos(e);
+            const node = this.findNodeAt(x, y);
+            if (node) {
+                this.selectNode(node);
+            }
         });
 
         this.canvas.addEventListener('wheel', (e) => {
@@ -141,6 +174,8 @@ class MemoryManager {
             this.offsetX = this.canvas.width / 2;
             this.offsetY = this.canvas.height / 2;
         });
+        document.getElementById('btn-node-expand').addEventListener('click', () => this.expandSelectedNode());
+        document.getElementById('btn-node-collapse').addEventListener('click', () => this.collapseSelectedNode());
 
         // View Switcher
         document.querySelectorAll('.switcher-btn').forEach(btn => {
@@ -237,11 +272,97 @@ class MemoryManager {
     }
 
     findNodeAt(x, y) {
-        return this.nodes.find(n => {
+        const scope = this.getRenderableNodes();
+        return scope.find(n => {
             const dx = n.x - x;
             const dy = n.y - y;
             return Math.sqrt(dx*dx + dy*dy) < n.radius * 2;
         });
+    }
+
+    getRenderableNodes() {
+        if (!this.visibleNodes || this.visibleNodes.size === 0) {
+            return this.nodes;
+        }
+        return this.nodes.filter(n => this.visibleNodes.has(n.id));
+    }
+
+    getRenderableEdges() {
+        if (!this.visibleNodes || this.visibleNodes.size === 0) {
+            return this.edges;
+        }
+        return this.edges.filter(e => this.visibleNodes.has(e.source.id) && this.visibleNodes.has(e.target.id));
+    }
+
+    selectNode(node) {
+        this.selectedNode = node;
+        if (this.expandedNodes.size === 0) {
+            this.expandedNodes.add(node.id);
+            this.recomputeVisibleSubgraph();
+        }
+        this.renderNodeDetails();
+    }
+
+    expandSelectedNode() {
+        if (!this.selectedNode) return;
+        this.expandedNodes.add(this.selectedNode.id);
+        this.recomputeVisibleSubgraph();
+        this.renderNodeDetails();
+    }
+
+    collapseSelectedNode() {
+        if (!this.selectedNode) return;
+        this.expandedNodes.delete(this.selectedNode.id);
+        if (this.expandedNodes.size === 0) {
+            this.visibleNodes = null;
+        } else {
+            this.recomputeVisibleSubgraph();
+        }
+        this.renderNodeDetails();
+    }
+
+    recomputeVisibleSubgraph() {
+        if (this.expandedNodes.size === 0) {
+            this.visibleNodes = null;
+            return;
+        }
+        const visible = new Set();
+        this.nodes.forEach(node => {
+            if (this.expandedNodes.has(node.id)) {
+                visible.add(node.id);
+                node.neighbors.forEach(id => visible.add(id));
+            }
+        });
+        this.visibleNodes = visible;
+    }
+
+    renderNodeDetails() {
+        const emptyEl = document.getElementById('node-detail-empty');
+        const contentEl = document.getElementById('node-detail-content');
+        if (!this.selectedNode) {
+            emptyEl.classList.remove('hidden');
+            contentEl.classList.add('hidden');
+            return;
+        }
+
+        emptyEl.classList.add('hidden');
+        contentEl.classList.remove('hidden');
+        document.getElementById('detail-node-name').innerText = this.selectedNode.id;
+        document.getElementById('detail-node-degree').innerText = `${this.selectedNode.neighbors.size} direct connection(s)`;
+
+        const relEl = document.getElementById('detail-node-relations');
+        const relations = this.selectedNode.relations || [];
+        if (relations.length === 0) {
+            relEl.innerHTML = '<li>No linked relations yet.</li>';
+        } else {
+            relEl.innerHTML = relations.slice(0, 25).map(r => `<li>${r}</li>`).join('');
+        }
+
+        const expandBtn = document.getElementById('btn-node-expand');
+        const collapseBtn = document.getElementById('btn-node-collapse');
+        const expanded = this.expandedNodes.has(this.selectedNode.id);
+        expandBtn.disabled = expanded;
+        collapseBtn.disabled = !expanded;
     }
 
     updateTooltip(e) {
@@ -261,10 +382,13 @@ class MemoryManager {
         const repulsion = 1000;
         
         // Repulsion
-        for (let i = 0; i < this.nodes.length; i++) {
-            for (let j = i + 1; j < this.nodes.length; j++) {
-                const n1 = this.nodes[i];
-                const n2 = this.nodes[j];
+        const renderNodes = this.getRenderableNodes();
+        const renderEdges = this.getRenderableEdges();
+
+        for (let i = 0; i < renderNodes.length; i++) {
+            for (let j = i + 1; j < renderNodes.length; j++) {
+                const n1 = renderNodes[i];
+                const n2 = renderNodes[j];
                 const dx = n1.x - n2.x;
                 const dy = n1.y - n2.y;
                 const distSq = dx*dx + dy*dy || 1;
@@ -278,7 +402,7 @@ class MemoryManager {
         }
 
         // Attraction (edges)
-        this.edges.forEach(e => {
+        renderEdges.forEach(e => {
             const dx = e.target.x - e.source.x;
             const dy = e.target.y - e.source.y;
             const dist = Math.sqrt(dx*dx + dy*dy) || 1;
@@ -291,7 +415,7 @@ class MemoryManager {
         });
 
         // Apply and dampen
-        this.nodes.forEach(n => {
+        renderNodes.forEach(n => {
             if (n === this.dragNode) return;
             n.x += n.vx;
             n.y += n.vy;
@@ -319,7 +443,10 @@ class MemoryManager {
         // Draw Edges
         this.ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
         this.ctx.lineWidth = 1 / this.zoom;
-        this.edges.forEach(e => {
+        const renderEdges = this.getRenderableEdges();
+        const renderNodes = this.getRenderableNodes();
+
+        renderEdges.forEach(e => {
             this.ctx.beginPath();
             this.ctx.moveTo(e.source.x, e.source.y);
             this.ctx.lineTo(e.target.x, e.target.y);
@@ -333,10 +460,11 @@ class MemoryManager {
         });
 
         // Draw Nodes
-        this.nodes.forEach(n => {
-            this.ctx.fillStyle = n === this.hoverNode ? '#5dade2' : n.color;
+        renderNodes.forEach(n => {
+            const isSelected = this.selectedNode && this.selectedNode.id === n.id;
+            this.ctx.fillStyle = isSelected ? '#f0b429' : (n === this.hoverNode ? '#5dade2' : n.color);
             this.ctx.beginPath();
-            this.ctx.arc(n.x, n.y, n.radius, 0, Math.PI * 2);
+            this.ctx.arc(n.x, n.y, isSelected ? n.radius + 2 : n.radius, 0, Math.PI * 2);
             this.ctx.fill();
             
             if (this.zoom > 0.5) {

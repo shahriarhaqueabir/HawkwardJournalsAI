@@ -33,7 +33,7 @@ HawkwardJournalAI is a private, offline-first Windows desktop productivity app b
 | AI engine          | Ollama REST API (localhost:11434) — llama3.2 default                                            |
 | Async runtime      | Tokio                                                                                           |
 | HTTP client        | reqwest (for Ollama API calls)                                                                  |
-| Frontend libraries | Chart.js 4.x · Marked.js 9.x · highlight.js 11.x · Flatpickr 4.x (all vendored locally, no CDN) |
+| Frontend libraries | Chart.js 4.x · Marked.js 9.x · DOMPurify · highlight.js 11.x · Flatpickr 4.x · SortableJS · Floating UI · Lucide Icons (all vendored locally, no CDN) |
 
 ---
 
@@ -43,6 +43,7 @@ HawkwardJournalAI is a private, offline-first Windows desktop productivity app b
 hawkwardjournalai/
 ├── src-tauri/
 │   ├── Cargo.toml                   All dependencies, all pinned
+│   ├── build.rs                     Tauri build script (`tauri_build::build`, cfg registration)
 │   ├── tauri.conf.json              Window: 1400×900, minWidth 1200
 │   ├── src/
 │   │   ├── main.rs                  Tauri entry, plugin registration, window close handler

@@ -1,6 +1,4 @@
 use std::fs::OpenOptions;
-use std::sync::Arc;
-use tauri::Manager;
 use tracing_subscriber::fmt::writer::MakeWriterExt;
 use tracing_subscriber::{layer::SubscriberExt, util::SubscriberInitExt};
 

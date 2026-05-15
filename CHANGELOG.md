@@ -1,5 +1,31 @@
 # Changelog
 
+## [0.6.1] - 2026-05-11
+
+### Fixed
+
+- Restored Tauri build-script wiring by adding `src-tauri/build.rs` with `tauri_build::build()`, fixing `OUT_DIR env var is not set` from `tauri::generate_context!()`.
+- Fixed moved-value borrow in `task_create` (`src-tauri/src/lib.rs`) by cloning `parent_task_id` when building `Task`, preserving later depth validation logic.
+- Fixed `graph_query` JSON conversion in `src-tauri/src/lib.rs` by serializing `graphqlite::CypherResult` rows manually instead of calling `serde_json::to_value` on a non-`Serialize` type.
+- Fixed `rusqlite::Row` API mismatch in `src-tauri/src/db/tasks.rs` by replacing `row.column_count()` access with an explicit `IS_BLOCKED_COLUMN_INDEX` for `SELECT *, ... as is_blocked` projections.
+- Reduced compilation warnings by removing unused imports in:
+  - `src-tauri/src/db/init.rs`
+  - `src-tauri/src/db/profile.rs`
+  - `src-tauri/src/logger.rs`
+  - `src-tauri/src/scheduler/reminders.rs`
+  - `src-tauri/src/lib.rs`
+- Fixed Tasks List/Board visibility switching by adding a global `.hidden` utility in `src/styles/base.css`, so the two task views render as separate toggled tabs instead of overlapping.
+- Fixed Proposed Facts acceptance in AI Sidebar (`src/js/ai-sidebar.js`) so facts can be added reliably like action items:
+  - Encoded fact `data-*` payloads to prevent quote/special-character breakage.
+  - Decoded payloads before `profile_upsert_fact` invocation.
+  - Added robust fact ID generation fallback when `crypto.randomUUID()` is unavailable.
+  - Moved fact object construction inside `try` to ensure runtime generation errors are surfaced and handled.
+- Upgraded Memory Neural Map into an interactive mindmap view (`src/views/memory.html`, `src/js/tabs/memory.js`):
+  - Added clickable node detail panel with node name, connection count, and relation list.
+  - Added node selection highlighting on canvas.
+  - Added explicit expand/collapse controls per selected node to explore the graph incrementally.
+  - Added subgraph filtering logic so expanded nodes and their neighbors are focused while exploring.
+
 ## [0.6.0] - 2026-05-08
 
 ### Added
@@ -14,6 +40,8 @@
 - **New Rust Commands**: Added `ai_chat`, `profile_upsert_fact`, `profile_get_facts`, `profile_delete_fact`, `timer_start`, `timer_stop`, `timer_get_logs`, `attachment_add`, `attachment_remove`, `attachment_list`, `report_bug`.
 - **New Events**: Added `AiToken` and `AiResponseComplete` for frontend UI synchronization.
 - **Dependencies**: Integrated `futures-util` for asynchronous stream processing in the backend and `tracing-subscriber` for persistent file logging.
+- **Backend Architecture Hardening**: Added `thiserror`, `validator` (with `derive`), and `moka` (with `future`) to `src-tauri/Cargo.toml`.
+- **Frontend Vendoring**: Downloaded and vendored `dompurify`, `sortablejs`, `@floating-ui/core`, `@floating-ui/dom`, and `lucide` into `src/assets/libs/`.
 
 ### Changed
 

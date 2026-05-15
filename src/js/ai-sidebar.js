@@ -6,6 +6,25 @@ let currentEntryId = null;
 let currentConversationId = null;
 let currentAiBubble = null;
 
+function encodeAttr(value) {
+  return encodeURIComponent(value ?? "");
+}
+
+function decodeAttr(value) {
+  try {
+    return decodeURIComponent(value ?? "");
+  } catch {
+    return value ?? "";
+  }
+}
+
+function createFactId() {
+  if (globalThis.crypto?.randomUUID) {
+    return globalThis.crypto.randomUUID();
+  }
+  return `fact_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export function initAiSidebar() {
   messagesEl = document.getElementById("ai-chat-messages");
   inputEl = document.getElementById("ai-chat-input");
@@ -167,7 +186,7 @@ function renderAnalysisResult(result) {
                 <span class="fact-text">${f.content}</span>
               </div>
               <div class="fact-actions">
-                <button class="btn-fact-add btn-ghost-sm" data-key="${f.key}" data-content="${f.content}" data-category="${f.category}">Accept</button>
+                <button class="btn-fact-add btn-ghost-sm" data-key="${encodeAttr(f.key)}" data-content="${encodeAttr(f.content)}" data-category="${encodeAttr(f.category)}">Accept</button>
                 <button class="btn-fact-reject btn-ghost-sm">Reject</button>
               </div>
             </li>
@@ -200,19 +219,19 @@ function renderAnalysisResult(result) {
   // Fact listeners (Phase 3 wiring)
   messagesEl.querySelectorAll(".btn-fact-add").forEach(btn => {
     btn.addEventListener("click", async () => {
-      const now = new Date().toISOString();
-      const fact = {
-        id: crypto.randomUUID(),
-        fact_key: btn.dataset.key,
-        content: btn.dataset.content,
-        category: btn.dataset.category,
-        confidence: 0.8, // Default confidence for user-accepted facts
-        source_entry_id: currentEntryId.value || null,
-        created_at: now,
-        updated_at: now
-      };
-
       try {
+        const now = new Date().toISOString();
+        const fact = {
+          id: createFactId(),
+          fact_key: decodeAttr(btn.dataset.key),
+          content: decodeAttr(btn.dataset.content),
+          category: decodeAttr(btn.dataset.category),
+          confidence: 0.8, // Default confidence for user-accepted facts
+          source_entry_id: currentEntryId.value || null,
+          created_at: now,
+          updated_at: now
+        };
+
         btn.disabled = true;
         btn.textContent = "...";
         await invoke("profile_upsert_fact", { fact });

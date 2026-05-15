@@ -18,8 +18,36 @@
     </div>
     
     <div id="map-view" class="memory-container">
-        <canvas id="memory-canvas"></canvas>
-        <div id="memory-tooltip" class="tooltip" style="display: none;"></div>
+        <div class="map-layout">
+            <div class="map-canvas-wrap">
+                <canvas id="memory-canvas"></canvas>
+                <div id="memory-tooltip" class="tooltip" style="display: none;"></div>
+            </div>
+            <aside id="node-detail-panel" class="node-detail-panel">
+                <h3>Knowledge Node</h3>
+                <div id="node-detail-empty" class="node-detail-empty">
+                    Select a node on the map to inspect it.
+                </div>
+                <div id="node-detail-content" class="hidden">
+                    <div class="node-detail-block">
+                        <div class="node-detail-label">Name</div>
+                        <div id="detail-node-name" class="node-detail-value"></div>
+                    </div>
+                    <div class="node-detail-block">
+                        <div class="node-detail-label">Connections</div>
+                        <div id="detail-node-degree" class="node-detail-value"></div>
+                    </div>
+                    <div class="node-detail-actions">
+                        <button id="btn-node-expand" class="switcher-btn">Expand Neighbors</button>
+                        <button id="btn-node-collapse" class="switcher-btn">Collapse</button>
+                    </div>
+                    <div class="node-detail-block">
+                        <div class="node-detail-label">Relations</div>
+                        <ul id="detail-node-relations" class="node-relations"></ul>
+                    </div>
+                </div>
+            </aside>
+        </div>
         
         <div class="memory-legend">
             <div class="legend-item"><span class="dot entity"></span> Entity</div>
@@ -80,6 +108,18 @@
     height: calc(100vh - 150px);
     background: var(--bg-primary);
     overflow: hidden;
+}
+
+.map-layout {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    height: 100%;
+}
+
+.map-canvas-wrap {
+    position: relative;
+    min-width: 0;
+    height: 100%;
 }
 
 #memory-canvas {
@@ -149,6 +189,65 @@
 .memory-controls button:hover {
     background: var(--accent-primary);
     color: white;
+}
+
+.node-detail-panel {
+    border-left: 1px solid var(--border-color);
+    background: var(--bg-secondary);
+    padding: 16px;
+    overflow-y: auto;
+}
+
+.node-detail-panel h3 {
+    font-size: 0.95rem;
+    margin-bottom: 12px;
+}
+
+.node-detail-empty {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+}
+
+.node-detail-block {
+    margin-bottom: 14px;
+}
+
+.node-detail-label {
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04rem;
+    color: var(--text-muted);
+    margin-bottom: 5px;
+}
+
+.node-detail-value {
+    font-size: 0.92rem;
+    color: var(--text-primary);
+    word-break: break-word;
+}
+
+.node-detail-actions {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 14px;
+}
+
+.node-relations {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.node-relations li {
+    font-size: 0.8rem;
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    padding: 8px;
+    background: rgba(255, 255, 255, 0.02);
 }
 
 .tooltip {
